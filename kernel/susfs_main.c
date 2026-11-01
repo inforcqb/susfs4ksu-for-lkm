@@ -263,6 +263,7 @@ enum susfs_layer_id {
     SUSFS_L_AVC_SPOOF,
     SUSFS_L_SUPERCALL,
     SUSFS_L_HIDE_SYMS,
+    SUSFS_L_PANIC_LOG,
     SUSFS_L_COUNT,
 };
 
@@ -316,6 +317,7 @@ static struct susfs_layer {
     { "avc_spoof",	susfs_avc_spoof_init,		susfs_avc_spoof_exit,	false, SUSFS_FEAT_AVC_SPOOF },
     { "supercall",	susfs_supercall_init,		susfs_supercall_exit,	false, -1 },
     { "hide_syms",	susfs_hide_syms_init,		susfs_hide_syms_exit,	false, SUSFS_FEAT_HIDE_SYMS },
+    { "panic_log",	susfs_panic_log_init,		susfs_panic_log_exit,	false, -1 },
 };
 
 /* Diagnostic: make one layer's init fail, by 1-based index, to exercise the rollback path
@@ -373,6 +375,7 @@ static const struct {
     { SUSFS_L_AVC_SPOOF, false },
     { SUSFS_L_SUPERCALL, true },
     { SUSFS_L_HIDE_SYMS, false },
+    { SUSFS_L_PANIC_LOG, false },
 };
 
 static int susfs_load_layer(int id, bool fatal)
