@@ -39,6 +39,7 @@ static struct kprobe panic_kp;
 static bool dumper_registered;
 static bool kprobe_registered;
 static atomic_t panic_dumped = ATOMIC_INIT(0);
+static char panic_buf[4096];
 
 static void (*kmsg_dump_fn)(enum kmsg_dump_reason reason);
 static int (*kmsg_dump_get_buffer_fn)(struct kmsg_dumper *dumper, bool syslog,
@@ -60,10 +61,11 @@ static __nocfi noinline bool call_kmsg_dump_get_buffer(struct kmsg_dumper *dumpe
 }
 
 /* Called by kmsg_dump() in panic context.  No allocations, no sleeping helpers. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 static void panic_log_dumper(struct kmsg_dumper *dumper,
-			     enum kmsg_dump_reason reason)
+			     struct kmsg_dump_detail *detail)
 {
-	char buf[4096];
+	struct kmsg_dump_iter iter = {};
 	size_t len;
 	loff_t pos;
 	int wrote = 0;
@@ -72,8 +74,9 @@ static void panic_log_dumper(struct kmsg_dumper *dumper,
 		return;
 
 	pos = 0;
-	while (call_kmsg_dump_get_buffer(dumper, true, buf, sizeof(buf), &len) && len) {
-		if (kernel_write(panic_filp, buf, len, &pos) < 0)
+	kmsg_dump_rewind(&iter);
+	while (kmsg_dump_get_buffer(&iter, true, panic_buf, sizeof(panic_buf), &len) && len) {
+		if (kernel_write(panic_filp, panic_buf, len, &pos) < 0)
 			break;
 		wrote += len;
 		if (wrote > 2 * 1024 * 1024)
@@ -82,6 +85,29 @@ static void panic_log_dumper(struct kmsg_dumper *dumper,
 	if (wrote)
 		vfs_fsync(panic_filp, 0);
 }
+#else
+static void panic_log_dumper(struct kmsg_dumper *dumper,
+			     enum kmsg_dump_reason reason)
+{
+	size_t len;
+	loff_t pos;
+	int wrote = 0;
+
+	if (!panic_filp || atomic_xchg(&panic_dumped, 1))
+		return;
+
+	pos = 0;
+	while (call_kmsg_dump_get_buffer(dumper, true, panic_buf, sizeof(panic_buf), &len) && len) {
+		if (kernel_write(panic_filp, panic_buf, len, &pos) < 0)
+			break;
+		wrote += len;
+		if (wrote > 2 * 1024 * 1024)
+			break;
+	}
+	if (wrote)
+		vfs_fsync(panic_filp, 0);
+}
+#endif
 
 static int panic_log_pre(struct kprobe *p, struct pt_regs *regs)
 {
