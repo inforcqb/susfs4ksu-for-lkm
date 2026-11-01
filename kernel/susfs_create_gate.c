@@ -37,9 +37,17 @@
 #include <linux/namei.h>
 #include <linux/dcache.h>
 #include <linux/path.h>
+#include <linux/mount.h>
+#include <linux/security.h>
+#include <linux/sched.h>
 #include <linux/err.h>
 #include <linux/uaccess.h>
 #include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+#include <linux/mnt_idmapping.h>
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
+#include <linux/user_namespace.h>
+#endif
 #include <asm/unistd.h>
 
 #include "susfs.h"
@@ -76,6 +84,31 @@ static struct filename *(*create_getname_fn)(const char __user *name, int flags,
 static int (*create_filename_lookup_fn)(int dfd, struct filename *name, unsigned flags,
 					struct path *path, struct path *root);
 static void (*create_putname_fn)(struct filename *name);
+
+/* Full mkdirat takeover.  These are the create-side symbols after the parent
+ * lookup; the last lookup is done here so the positive dentry survives for the
+ * sus_path identity check. */
+static int (*create_filename_parentat_fn)(int dfd, struct filename *name,
+					  unsigned int flags, struct path *parent,
+					  struct qstr *last, int *type);
+static struct dentry *(*create_lookup_one_qstr_excl_fn)(const struct qstr *name,
+							struct dentry *base,
+							unsigned int flags);
+static int (*create_security_path_mkdir_fn)(const struct path *path,
+					    struct dentry *dentry, umode_t mode);
+static void (*create_done_path_create_fn)(struct path *path, struct dentry *dentry);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+static int (*create_vfs_mkdir_fn)(struct mnt_idmap *idmap, struct inode *dir,
+				  struct dentry *dentry, umode_t mode);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
+static int (*create_vfs_mkdir_fn)(struct user_namespace *mnt_userns,
+				  struct inode *dir, struct dentry *dentry,
+				  umode_t mode);
+#else
+static int (*create_vfs_mkdir_fn)(struct inode *dir, struct dentry *dentry,
+				  umode_t mode);
+#endif
+static bool create_takeover_ready;
 
 static susfs_syscall_fn_t create_orig_mknodat;
 static susfs_syscall_fn_t create_orig_mkdirat;
@@ -135,15 +168,107 @@ static __nocfi noinline bool create_name_hidden(int dfd, const char __user *path
 	return hidden;
 }
 
+static umode_t create_strip_umask(struct inode *dir, umode_t mode)
+{
+	if (!IS_POSIXACL(dir))
+		mode &= ~current_umask();
+	return mode;
+}
+
+static __nocfi noinline int create_call_vfs_mkdir(struct path *path,
+						 struct dentry *dentry, umode_t mode)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+	return create_vfs_mkdir_fn(mnt_idmap(path->mnt), d_inode(path->dentry),
+				   dentry, mode);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
+	return create_vfs_mkdir_fn(mnt_user_ns(path->mnt), d_inode(path->dentry),
+				   dentry, mode);
+#else
+	return create_vfs_mkdir_fn(d_inode(path->dentry), dentry, mode);
+#endif
+}
+
+/* A local filename_create() that keeps the positive dentry on EEXIST, so the
+ * sus_path identity gate can answer EACCES instead of dropping straight to EEXIST.
+ * There is exactly one parent+last lookup here, the same one the kernel would do. */
+static __nocfi noinline long create_takeover_mkdirat(int dfd,
+						     const char __user *pathname,
+						     umode_t mode)
+{
+	struct filename *name;
+	struct path path;
+	struct qstr last;
+	int type = 0, err, err2;
+	struct dentry *dentry;
+	bool hidden;
+
+	if (!create_takeover_ready)
+		return -ENOSYS;
+
+	name = create_getname_fn(pathname, 0, NULL);
+	if (IS_ERR(name))
+		return PTR_ERR(name);
+
+	err = create_filename_parentat_fn(dfd, name, 0, &path, &last, &type);
+	if (err) {
+		create_putname_fn(name);
+		return err;
+	}
+	if (type != LAST_NORM) {
+		path_put(&path);
+		create_putname_fn(name);
+		return -EINVAL;
+	}
+
+	err2 = mnt_want_write(path.mnt);
+	inode_lock_nested(d_inode(path.dentry), I_MUTEX_PARENT);
+	dentry = create_lookup_one_qstr_excl_fn(&last, path.dentry,
+						LOOKUP_CREATE | LOOKUP_EXCL);
+	if (IS_ERR(dentry)) {
+		err = PTR_ERR(dentry);
+		inode_unlock(d_inode(path.dentry));
+		if (!err2)
+			mnt_drop_write(path.mnt);
+		path_put(&path);
+		create_putname_fn(name);
+		return err;
+	}
+
+	if (d_is_positive(dentry)) {
+		hidden = sus_path_inode_hidden_public(d_inode(dentry));
+		dput(dentry);
+		inode_unlock(d_inode(path.dentry));
+		if (!err2)
+			mnt_drop_write(path.mnt);
+		path_put(&path);
+		create_putname_fn(name);
+		return hidden ? -EACCES : -EEXIST;
+	}
+
+	if (err2) {
+		dput(dentry);
+		inode_unlock(d_inode(path.dentry));
+		path_put(&path);
+		create_putname_fn(name);
+		return err2;
+	}
+
+	err = create_security_path_mkdir_fn(&path, dentry,
+					    create_strip_umask(d_inode(path.dentry), mode));
+	if (!err)
+		err = create_call_vfs_mkdir(&path, dentry, mode);
+
+	create_done_path_create_fn(&path, dentry);
+	create_putname_fn(name);
+	return err;
+}
+
 static __nocfi noinline long create_wrap_mkdirat(const struct pt_regs *regs)
 {
-	susfs_syscall_fn_t orig = READ_ONCE(create_orig_mkdirat);
-
-	if (!orig)
-		return -ENOSYS;
-	if (create_name_hidden((int)regs->regs[0], (const char __user *)regs->regs[1]))
-		return -EACCES;
-	return orig(regs);
+	return create_takeover_mkdirat((int)regs->regs[0],
+				       (const char __user *)regs->regs[1],
+				       (umode_t)regs->regs[2]);
 }
 
 static __nocfi noinline long create_wrap_mknodat(const struct pt_regs *regs)
@@ -187,13 +312,9 @@ static __nocfi noinline long create_wrap_linkat(const struct pt_regs *regs)
 
 static __nocfi noinline long create_wrap_compat_mkdirat(const struct pt_regs *regs)
 {
-	susfs_syscall_fn_t orig = READ_ONCE(create_orig_compat_mkdirat);
-
-	if (!orig)
-		return -ENOSYS;
-	if (create_name_hidden((int)regs->regs[0], (const char __user *)regs->regs[1]))
-		return -EACCES;
-	return orig(regs);
+	return create_takeover_mkdirat((int)regs->regs[0],
+				       (const char __user *)regs->regs[1],
+				       (umode_t)regs->regs[2]);
 }
 
 static __nocfi noinline long create_wrap_compat_mknodat(const struct pt_regs *regs)
@@ -268,12 +389,34 @@ int susfs_create_gate_init(void)
 		return -ENOENT;
 	}
 
+	create_filename_parentat_fn = (void *)find_kernel_symbol_exact("filename_parentat");
+	create_lookup_one_qstr_excl_fn = (void *)find_kernel_symbol_exact("lookup_one_qstr_excl");
+	create_security_path_mkdir_fn = (void *)find_kernel_symbol_exact("security_path_mkdir");
+	create_done_path_create_fn = (void *)find_kernel_symbol_exact("done_path_create");
+	create_vfs_mkdir_fn = (void *)find_kernel_symbol_exact("vfs_mkdir");
+	create_takeover_ready = create_filename_parentat_fn &&
+				create_lookup_one_qstr_excl_fn &&
+				create_security_path_mkdir_fn &&
+				create_done_path_create_fn &&
+				create_vfs_mkdir_fn;
+	if (!create_takeover_ready)
+		pr_warn("create_gate: mkdirat takeover unavailable (parentat=%px lookup_one=%px security_path_mkdir=%px done_path_create=%px vfs_mkdir=%px)\n",
+			create_filename_parentat_fn, create_lookup_one_qstr_excl_fn,
+			create_security_path_mkdir_fn, create_done_path_create_fn,
+			create_vfs_mkdir_fn);
+	else
+		SUSFS_LOGI("create_gate: mkdirat takeover armed\n");
+
 	/* Unconditional: a supercall can add a rule before/after this layer, so the
 	 * entries must be there whenever the module is.  An entry that cannot be
 	 * installed leaves the others working and the kernel's own answer in place. */
 	for (i = 0; i < (int)ARRAY_SIZE(create_hooks); i++) {
 		struct susfs_fp_hook *h = &create_hooks[i];
 
+		if (h->nr == __NR_mkdirat && !create_takeover_ready) {
+			pr_warn("create_gate: mkdirat takeover not ready - leaving the native syscall alone\n");
+			continue;
+		}
 		rc = susfs_fp_install(h);
 		if (rc) {
 			pr_warn("create_gate: %s not installed (%d) - that syscall answers the kernel's own way\n",
