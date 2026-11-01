@@ -51,6 +51,25 @@ static __nocfi noinline void call_kmsg_dump(enum kmsg_dump_reason reason)
 		kmsg_dump_fn(reason);
 }
 
+static int panic_log_test_set(const char *val, const struct kernel_param *kp)
+{
+	int enable, rc;
+
+	rc = kstrtoint(val, 0, &enable);
+	if (rc)
+		return rc;
+	if (enable && dumper_registered) {
+		atomic_set(&panic_dumped, 0);
+		call_kmsg_dump(KMSG_DUMP_PANIC);
+	}
+	return 0;
+}
+
+static const struct kernel_param_ops panic_log_test_ops = {
+	.set = panic_log_test_set,
+};
+module_param_cb(panic_log_test, &panic_log_test_ops, NULL, 0200);
+
 static __nocfi noinline bool call_kmsg_dump_get_buffer(struct kmsg_dumper *dumper,
 						       bool syslog, char *buf,
 						       size_t size, size_t *len)
