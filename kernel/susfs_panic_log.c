@@ -44,6 +44,7 @@ static char panic_buf[4096];
 static void (*kmsg_dump_fn)(enum kmsg_dump_reason reason);
 static int (*kmsg_dump_get_buffer_fn)(struct kmsg_dumper *dumper, bool syslog,
 				      char *buf, size_t size, size_t *len);
+static void (*kmsg_dump_rewind_fn)(struct kmsg_dumper *dumper);
 
 static __nocfi noinline void call_kmsg_dump(enum kmsg_dump_reason reason)
 {
@@ -77,6 +78,12 @@ static __nocfi noinline bool call_kmsg_dump_get_buffer(struct kmsg_dumper *dumpe
 	if (!kmsg_dump_get_buffer_fn)
 		return false;
 	return kmsg_dump_get_buffer_fn(dumper, syslog, buf, size, len);
+}
+
+static __nocfi noinline void call_kmsg_dump_rewind(struct kmsg_dumper *dumper)
+{
+	if (kmsg_dump_rewind_fn)
+		kmsg_dump_rewind_fn(dumper);
 }
 
 /* Called by kmsg_dump() in panic context.  No allocations, no sleeping helpers. */
@@ -116,6 +123,7 @@ static void panic_log_dumper(struct kmsg_dumper *dumper,
 		return;
 
 	pos = 0;
+	call_kmsg_dump_rewind(dumper);
 	while (call_kmsg_dump_get_buffer(dumper, true, panic_buf, sizeof(panic_buf), &len) && len) {
 		if (kernel_write(panic_filp, panic_buf, len, &pos) < 0)
 			break;
@@ -147,7 +155,8 @@ int susfs_panic_log_init(void)
 
 	kmsg_dump_fn = (void *)find_kernel_symbol_exact("kmsg_dump");
 	kmsg_dump_get_buffer_fn = (void *)find_kernel_symbol_exact("kmsg_dump_get_buffer");
-	if (!kmsg_dump_fn || !kmsg_dump_get_buffer_fn) {
+	kmsg_dump_rewind_fn = (void *)find_kernel_symbol_exact("kmsg_dump_rewind");
+	if (!kmsg_dump_fn || !kmsg_dump_get_buffer_fn || !kmsg_dump_rewind_fn) {
 		pr_warn("susfs_panic_log: kmsg_dump symbols unavailable\n");
 		return -ENOENT;
 	}
