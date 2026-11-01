@@ -39,7 +39,18 @@ static struct kprobe panic_kp;
 static bool dumper_registered;
 static bool kprobe_registered;
 static atomic_t panic_dumped = ATOMIC_INIT(0);
-static char panic_buf[4096];
+static char panic_buf[16384];
+static size_t panic_len;
+
+static void panic_log_export(void)
+{
+	loff_t pos = 0;
+
+	if (!panic_filp || !panic_len)
+		return;
+	if (kernel_write(panic_filp, panic_buf, panic_len, &pos) > 0)
+		vfs_fsync(panic_filp, 0);
+}
 
 static void (*kmsg_dump_fn)(enum kmsg_dump_reason reason);
 static int (*kmsg_dump_get_buffer_fn)(struct kmsg_dumper *dumper, bool syslog,
@@ -61,7 +72,9 @@ static int panic_log_test_set(const char *val, const struct kernel_param *kp)
 		return rc;
 	if (enable && dumper_registered) {
 		atomic_set(&panic_dumped, 0);
+		panic_len = 0;
 		call_kmsg_dump(KMSG_DUMP_PANIC);
+		panic_log_export();
 	}
 	return 0;
 }
@@ -86,53 +99,34 @@ static __nocfi noinline void call_kmsg_dump_rewind(struct kmsg_dumper *dumper)
 		kmsg_dump_rewind_fn(dumper);
 }
 
-/* Called by kmsg_dump() in panic context.  No allocations, no sleeping helpers. */
+/* Called by kmsg_dump() in panic context.  Copy only; the file write happens after
+ * kmsg_dump() returns, outside its RCU read-side section. */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 static void panic_log_dumper(struct kmsg_dumper *dumper,
 			     struct kmsg_dump_detail *detail)
 {
 	struct kmsg_dump_iter iter = {};
-	size_t len;
-	loff_t pos;
-	int wrote = 0;
+	size_t len = 0;
 
-	if (!panic_filp || atomic_xchg(&panic_dumped, 1))
+	if (atomic_xchg(&panic_dumped, 1))
 		return;
 
-	pos = 0;
 	kmsg_dump_rewind(&iter);
-	while (kmsg_dump_get_buffer(&iter, true, panic_buf, sizeof(panic_buf), &len) && len) {
-		if (kernel_write(panic_filp, panic_buf, len, &pos) < 0)
-			break;
-		wrote += len;
-		if (wrote > 2 * 1024 * 1024)
-			break;
-	}
-	if (wrote)
-		vfs_fsync(panic_filp, 0);
+	if (kmsg_dump_get_buffer(&iter, true, panic_buf, sizeof(panic_buf), &len))
+		panic_len = len;
 }
 #else
 static void panic_log_dumper(struct kmsg_dumper *dumper,
 			     enum kmsg_dump_reason reason)
 {
-	size_t len;
-	loff_t pos;
-	int wrote = 0;
+	size_t len = 0;
 
-	if (!panic_filp || atomic_xchg(&panic_dumped, 1))
+	if (atomic_xchg(&panic_dumped, 1))
 		return;
 
-	pos = 0;
 	call_kmsg_dump_rewind(dumper);
-	while (call_kmsg_dump_get_buffer(dumper, true, panic_buf, sizeof(panic_buf), &len) && len) {
-		if (kernel_write(panic_filp, panic_buf, len, &pos) < 0)
-			break;
-		wrote += len;
-		if (wrote > 2 * 1024 * 1024)
-			break;
-	}
-	if (wrote)
-		vfs_fsync(panic_filp, 0);
+	if (call_kmsg_dump_get_buffer(dumper, true, panic_buf, sizeof(panic_buf), &len))
+		panic_len = len;
 }
 #endif
 
@@ -141,8 +135,10 @@ static int panic_log_pre(struct kprobe *p, struct pt_regs *regs)
 	/* Run the kernel's own dump path early; the dumper above writes our copy.
 	 * The real panic will call kmsg_dump() again; the atomic guard makes our
 	 * copy one-shot. */
-	if (panic_log_enabled)
+	if (panic_log_enabled) {
 		call_kmsg_dump(KMSG_DUMP_PANIC);
+		panic_log_export();
+	}
 	return 0;
 }
 
