@@ -90,7 +90,8 @@ static void (*create_putname_fn)(struct filename *name);
  * sus_path identity check. */
 static int (*create_filename_parentat_fn)(int dfd, struct filename *name,
 					  unsigned int flags, struct path *parent,
-					  struct qstr *last, int *type);
+					  struct qstr *last, int *type,
+					  const struct path *root);
 static struct dentry *(*create_lookup_one_qstr_excl_fn)(const struct qstr *name,
 							struct dentry *base,
 							unsigned int flags);
@@ -210,7 +211,7 @@ static __nocfi noinline long create_takeover_mkdirat(int dfd,
 	if (IS_ERR(name))
 		return PTR_ERR(name);
 
-	err = create_filename_parentat_fn(dfd, name, 0, &path, &last, &type);
+	err = create_filename_parentat_fn(dfd, name, 0, &path, &last, &type, NULL);
 	if (err) {
 		create_putname_fn(name);
 		return err;
@@ -254,8 +255,9 @@ static __nocfi noinline long create_takeover_mkdirat(int dfd,
 		return err2;
 	}
 
-	err = create_security_path_mkdir_fn(&path, dentry,
-					    create_strip_umask(d_inode(path.dentry), mode));
+	err = create_security_path_mkdir_fn ?
+		create_security_path_mkdir_fn(&path, dentry,
+					      create_strip_umask(d_inode(path.dentry), mode)) : 0;
 	if (!err)
 		err = create_call_vfs_mkdir(&path, dentry, mode);
 
@@ -390,22 +392,23 @@ int susfs_create_gate_init(void)
 	}
 
 	create_filename_parentat_fn = (void *)find_kernel_symbol_exact("filename_parentat");
+	if (!create_filename_parentat_fn)
+		create_filename_parentat_fn = (void *)find_kernel_symbol_exact("__filename_parentat");
 	create_lookup_one_qstr_excl_fn = (void *)find_kernel_symbol_exact("lookup_one_qstr_excl");
 	create_security_path_mkdir_fn = (void *)find_kernel_symbol_exact("security_path_mkdir");
 	create_done_path_create_fn = (void *)find_kernel_symbol_exact("done_path_create");
 	create_vfs_mkdir_fn = (void *)find_kernel_symbol_exact("vfs_mkdir");
 	create_takeover_ready = create_filename_parentat_fn &&
 				create_lookup_one_qstr_excl_fn &&
-				create_security_path_mkdir_fn &&
 				create_done_path_create_fn &&
 				create_vfs_mkdir_fn;
 	if (!create_takeover_ready)
-		pr_warn("create_gate: mkdirat takeover unavailable (parentat=%px lookup_one=%px security_path_mkdir=%px done_path_create=%px vfs_mkdir=%px)\n",
+		pr_warn("create_gate: mkdirat takeover unavailable (parentat=%px lookup_one=%px done_path_create=%px vfs_mkdir=%px)\n",
 			create_filename_parentat_fn, create_lookup_one_qstr_excl_fn,
-			create_security_path_mkdir_fn, create_done_path_create_fn,
-			create_vfs_mkdir_fn);
+			create_done_path_create_fn, create_vfs_mkdir_fn);
 	else
-		SUSFS_LOGI("create_gate: mkdirat takeover armed\n");
+		SUSFS_LOGI("create_gate: mkdirat takeover armed (path_mkdir=%s)\n",
+			   create_security_path_mkdir_fn ? "yes" : "no");
 
 	/* Unconditional: a supercall can add a rule before/after this layer, so the
 	 * entries must be there whenever the module is.  An entry that cannot be
