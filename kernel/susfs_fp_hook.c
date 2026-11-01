@@ -232,6 +232,11 @@ int susfs_fp_install(struct susfs_fp_hook *h)
 			h->name, h->wrapper ? READ_ONCE(*(const u32 *)h->wrapper) : 0);
 		return -EINVAL;
 	}
+	if (h->wrapper_compat && !fp_has_landing_pad((const void *)h->wrapper_compat)) {
+		pr_warn("susfs_fp: %s compat wrapper has no valid call landing pad (0x%08x) - not installed\n",
+			h->name, READ_ONCE(*(const u32 *)h->wrapper_compat));
+		return -EINVAL;
+	}
 
 	if (h->nr >= 0) {
 		old = READ_ONCE(sys_call_table_ptr[h->nr]);
@@ -264,6 +269,7 @@ int susfs_fp_install(struct susfs_fp_hook *h)
 				h->name);
 		} else {
 			susfs_syscall_fn_t cold = READ_ONCE(compat_sys_call_table_ptr[cnr]);
+			susfs_syscall_fn_t compat_wrapper = h->wrapper_compat ? h->wrapper_compat : h->wrapper;
 
 			if (!cold) {
 				pr_warn("susfs_fp: %s: compat entry %d is NULL\n",
@@ -274,7 +280,7 @@ int susfs_fp_install(struct susfs_fp_hook *h)
 					WRITE_ONCE(*h->orig_slot_compat, cold);
 				smp_wmb();
 				err = fp_patch_entry(compat_sys_call_table_ptr, cnr, h->name,
-						     h->wrapper, cold);
+						     compat_wrapper, cold);
 				if (err) {
 					/* Keep the two tables consistent rather than half-armed. */
 					if (native_done)
