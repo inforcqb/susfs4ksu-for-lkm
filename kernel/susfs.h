@@ -185,6 +185,10 @@ void susfs_sus_mount_supercall(void __user **arg);
 int susfs_hide_syms_init(void);
 void susfs_hide_syms_exit(void);
 
+/* Best-effort panic log export through a second kmsg dumper. */
+int susfs_panic_log_init(void);
+void susfs_panic_log_exit(void);
+
 /* Actual install state: enabled_features must not advertise a feature whose registration failed - hide_syms used to fail
  * silently and still be reported as active, the kind of inconsistency a detector looks for. */
 bool susfs_hide_syms_active(void);
