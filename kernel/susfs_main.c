@@ -262,6 +262,7 @@ enum susfs_layer_id {
     SUSFS_L_AVC_SPOOF,
     SUSFS_L_SUPERCALL,
     SUSFS_L_HIDE_SYMS,
+    SUSFS_L_PANIC_LOG,
     SUSFS_L_COUNT,
 };
 
@@ -311,6 +312,7 @@ static struct susfs_layer {
     { "avc_spoof",	susfs_avc_spoof_init,		susfs_avc_spoof_exit,	false, SUSFS_FEAT_AVC_SPOOF },
     { "supercall",	susfs_supercall_init,		susfs_supercall_exit,	false, -1 },
     { "hide_syms",	susfs_hide_syms_init,		susfs_hide_syms_exit,	false, SUSFS_FEAT_HIDE_SYMS },
+    { "panic_log",	susfs_panic_log_init,		susfs_panic_log_exit,	false, -1 },
 };
 
 /* Diagnostic: make one layer's init fail, by 1-based index, to exercise the rollback path
@@ -323,6 +325,7 @@ static struct susfs_layer {
  *   1 fp_hook   2 ksu_umount_gate  3 ksu_allow_gate  4 lsm_hook   5 sus_path
  *   6 opath  7 dirent  8 uname  9 kstat  10 sus_map  11 sus_mount
  *   12 cmdline  13 open_redirect  14 enable_log  15 avc_spoof  16 supercall  17 hide_syms
+ *   18 panic_log
  */
 static int fail_layer;
 module_param_named(fail_layer, fail_layer, int, 0644);
@@ -367,6 +370,7 @@ static const struct {
     { SUSFS_L_AVC_SPOOF, false },
     { SUSFS_L_SUPERCALL, true },
     { SUSFS_L_HIDE_SYMS, false },
+    { SUSFS_L_PANIC_LOG, false },
 };
 
 static int susfs_load_layer(int id, bool fatal)
