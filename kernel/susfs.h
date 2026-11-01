@@ -212,11 +212,6 @@ bool sus_path_inode_hidden_public(struct inode *inode);
  * they resolve a path, so an empty table costs one load and nothing else. */
 bool sus_path_rules_present(void);
 
-/* Whether any ordinary (operator-supplied) sus_path rule is live.  Self-protect entries for the
- * module's own /proc nodes are deliberately excluded: the create family must stay a fast pass
- * when only those exist. */
-bool sus_path_user_rules_present(void);
-
 /* Whether a 0777 /proc/susfs_* control node may be created.  Two independent conditions, neither optional: susfs_expose_proc
  * (the operator opted in) and sus_path_lsm_active() (with 0777 DAC passes every caller, so only the LSM layer can still
  * answer ENOENT for an app).  This gates node CREATION ONLY, never hook registration: an earlier revision returned early from

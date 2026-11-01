@@ -100,7 +100,7 @@ static __nocfi noinline bool create_name_hidden(int dfd, const char __user *path
 	bool hidden;
 	int rc;
 
-	if (!sus_path_user_rules_present())
+	if (!sus_path_rules_present())
 		return false;
 	if (!create_getname_fn || !create_filename_lookup_fn || !create_putname_fn)
 		return false;
