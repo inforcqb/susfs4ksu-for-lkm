@@ -284,11 +284,13 @@ static struct susfs_fp_hook create_hooks[] = {
 	  .orig_slot_compat = &create_orig_compat_mknodat },
 	{ .nr = __NR_symlinkat, .nr_compat = COMPAT_SYMLINKAT_NR,
 	  .name = "create/symlinkat", .sym = "__arm64_sys_symlinkat",
-	  .wrapper = create_wrap_symlinkat, .orig_slot = &create_orig_symlinkat,
+	  .wrapper = create_wrap_symlinkat, .wrapper_compat = create_wrap_compat_symlinkat,
+	  .orig_slot = &create_orig_symlinkat,
 	  .orig_slot_compat = &create_orig_compat_symlinkat },
 	{ .nr = __NR_linkat, .nr_compat = COMPAT_LINKAT_NR,
 	  .name = "create/linkat", .sym = "__arm64_sys_linkat",
-	  .wrapper = create_wrap_linkat, .orig_slot = &create_orig_linkat,
+	  .wrapper = create_wrap_linkat, .wrapper_compat = create_wrap_compat_linkat,
+	  .orig_slot = &create_orig_linkat,
 	  .orig_slot_compat = &create_orig_compat_linkat },
 };
 
