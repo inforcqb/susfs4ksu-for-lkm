@@ -39,8 +39,27 @@ static struct kprobe panic_kp;
 static bool dumper_registered;
 static bool kprobe_registered;
 static atomic_t panic_dumped = ATOMIC_INIT(0);
-static char panic_buf[16384];
+static char panic_buf[65536];
+static char panic_chunk[2048];
 static size_t panic_len;
+
+static void panic_log_store(const char *chunk, size_t len)
+{
+	size_t drop;
+
+	if (len >= sizeof(panic_buf)) {
+		memcpy(panic_buf, chunk + len - sizeof(panic_buf), sizeof(panic_buf));
+		panic_len = sizeof(panic_buf);
+		return;
+	}
+	if (panic_len + len > sizeof(panic_buf)) {
+		drop = panic_len + len - sizeof(panic_buf);
+		memmove(panic_buf, panic_buf + drop, panic_len - drop);
+		panic_len -= drop;
+	}
+	memcpy(panic_buf + panic_len, chunk, len);
+	panic_len += len;
+}
 
 static void panic_log_export(void)
 {
@@ -112,8 +131,9 @@ static void panic_log_dumper(struct kmsg_dumper *dumper,
 		return;
 
 	kmsg_dump_rewind(&iter);
-	if (kmsg_dump_get_buffer(&iter, true, panic_buf, sizeof(panic_buf), &len))
-		panic_len = len;
+	while (kmsg_dump_get_buffer(&iter, true, panic_chunk,
+				    sizeof(panic_chunk), &len) && len)
+		panic_log_store(panic_chunk, len);
 }
 #else
 static void panic_log_dumper(struct kmsg_dumper *dumper,
@@ -125,8 +145,9 @@ static void panic_log_dumper(struct kmsg_dumper *dumper,
 		return;
 
 	call_kmsg_dump_rewind(dumper);
-	if (call_kmsg_dump_get_buffer(dumper, true, panic_buf, sizeof(panic_buf), &len))
-		panic_len = len;
+	while (call_kmsg_dump_get_buffer(dumper, true, panic_chunk,
+					 sizeof(panic_chunk), &len) && len)
+		panic_log_store(panic_chunk, len);
 }
 #endif
 
