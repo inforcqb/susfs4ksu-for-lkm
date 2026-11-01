@@ -27,7 +27,7 @@
 
 #define SUSFS_PANIC_LOG_PATH "/data/local/tmp/susfs_panic.log"
 
-static const char *panic_log_path = SUSFS_PANIC_LOG_PATH;
+static char *panic_log_path = SUSFS_PANIC_LOG_PATH;
 module_param_named(panic_log_path, panic_log_path, charp, 0444);
 
 static int panic_log_enabled = 1;
