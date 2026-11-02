@@ -244,6 +244,11 @@ int susfs_fp_install(struct susfs_fp_hook *h)
 			pr_warn("susfs_fp: %s: table entry is NULL\n", h->name);
 			return -ENOENT;
 		}
+		if (old == h->wrapper) {
+			pr_warn("susfs_fp: %s: native entry already points at our wrapper - stale from a previous load, refusing to recurse\n",
+				h->name);
+			return -EINVAL;
+		}
 
 		/* Publish the original BEFORE the table points at us: the wrapper reads this
 		 * slot, so a table entry that is live while the slot is still NULL would jump
@@ -274,6 +279,13 @@ int susfs_fp_install(struct susfs_fp_hook *h)
 			if (!cold) {
 				pr_warn("susfs_fp: %s: compat entry %d is NULL\n",
 					h->name, cnr);
+			} else if (cold == compat_wrapper) {
+				pr_warn("susfs_fp: %s: compat entry %d already points at our wrapper - stale from a previous load, refusing to recurse\n",
+					h->name, cnr);
+				if (native_done)
+					ksu_patch_text(&sys_call_table_ptr[h->nr], &h->orig,
+						       sizeof(h->orig), KSU_PATCH_TEXT_FLUSH_DCACHE);
+				return -EINVAL;
 			} else {
 				h->orig_compat = cold;
 				if (h->orig_slot_compat)
@@ -312,21 +324,24 @@ int susfs_fp_install(struct susfs_fp_hook *h)
 
 void susfs_fp_remove(struct susfs_fp_hook *h)
 {
+	susfs_syscall_fn_t compat_wrapper;
+	bool native_ours = true;
 	int cnr, err;
 
 	if (!h->installed || !sys_call_table_ptr)
 		return;
 
 	cnr = fp_compat_nr(h);
+	compat_wrapper = h->wrapper_compat ? h->wrapper_compat : h->wrapper;
 
 	if (h->nr >= 0 && READ_ONCE(sys_call_table_ptr[h->nr]) != h->wrapper) {
-		pr_warn("susfs_fp: nr %d is not ours any more, leaving it alone\n", h->nr);
-		h->installed = false;
-		return;
+		pr_warn("susfs_fp: nr %d is not ours any more, leaving the native entry alone\n",
+			h->nr);
+		native_ours = false;
 	}
 
 	if (cnr >= 0 && compat_sys_call_table_ptr && h->orig_compat &&
-	    READ_ONCE(compat_sys_call_table_ptr[cnr]) == h->wrapper) {
+	    READ_ONCE(compat_sys_call_table_ptr[cnr]) == compat_wrapper) {
 		err = ksu_patch_text(&compat_sys_call_table_ptr[cnr], &h->orig_compat,
 				     sizeof(h->orig_compat), KSU_PATCH_TEXT_FLUSH_DCACHE);
 		if (err)
@@ -337,7 +352,7 @@ void susfs_fp_remove(struct susfs_fp_hook *h)
 	}
 
 	/* nr < 0 means there is no native entry: only the compat one above was ours. */
-	if (h->nr >= 0) {
+	if (h->nr >= 0 && native_ours) {
 		err = ksu_patch_text(&sys_call_table_ptr[h->nr], &h->orig,
 				     sizeof(h->orig), KSU_PATCH_TEXT_FLUSH_DCACHE);
 		if (err)
