@@ -50,6 +50,32 @@ def main():
             assert z.read("kmi_override").decode() == "android15-6.6\n"
             provenance = z.read("provenance.json").decode()
             assert '"kmi_override": "android15-6.6"' in provenance, provenance
+
+        # The supported range is numeric: 5.4-6.6, not the 5.10-6.6 a text sort would give.
+        older = d / "older"
+        older.mkdir()
+        for k in ("android11-5.4", "android12-5.10", "android15-6.6"):
+            (older / f"susfs_guard_lkm-{k}.ko").write_bytes(b"mock")
+        subprocess.run([sys.executable, str(ROOT / "tools/pack_module.py"),
+                        "--ko-dir", str(older), "--insmod", str(d / "susfs_insmod"),
+                        "--tag", "v0.0.0-test", "--out", str(d / "older.zip")], check=True)
+        with zipfile.ZipFile(d / "older.zip") as z:
+            assert "3 arm64 KMIs, 5.4-6.6" in z.read("module.prop").decode()
+
+        # What the caller gets wrong has to fail loudly, not land in the ZIP.
+        def run(ko_dir, tag="v0.0.0-test"):
+            return subprocess.run([sys.executable, str(ROOT / "tools/pack_module.py"),
+                                   "--ko-dir", str(ko_dir), "--insmod", str(d / "susfs_insmod"),
+                                   "--tag", tag, "--out", str(d / "x.zip")],
+                                  capture_output=True, text=True)
+
+        r = run(d, tag="v1\nid=evil")
+        assert r.returncode != 0 and "single line" in r.stderr, r.stderr
+        bogus = d / "bogus"
+        bogus.mkdir()
+        (bogus / "susfs_guard_lkm-gki.ko").write_bytes(b"mock")
+        r = run(bogus)
+        assert r.returncode != 0 and "unexpected KMI name" in r.stderr, r.stderr
         print("pack test ok")
 
 
