@@ -36,6 +36,9 @@ def main():
     ap.add_argument("--kmi-override", default="",
                     help="force this packaged KMI at install/load time (one of the built KMIs)")
     args = ap.parse_args()
+    # module.prop is one key per line, so a newline in the tag would add a line of its own.
+    if not args.tag or any(ord(c) < 0x20 for c in args.tag):
+        raise SystemExit(f"--tag must be a non-empty single line: {args.tag!r}")
 
     ko_dir = Path(args.ko_dir)
     insmod = Path(args.insmod)
@@ -46,6 +49,11 @@ def main():
         raise SystemExit(f"loader not found: {insmod}")
 
     kmis = [re.sub(r"^susfs_guard_lkm-|\.ko$", "", p.name) for p in kos]
+    for kmi in kmis:
+        # module/kmi.sh splits a KMI on the last hyphen, so this is the only usable shape.
+        if not re.fullmatch(r"android[0-9]+-[0-9]+(?:\.[0-9]+)*", kmi):
+            raise SystemExit(f"unexpected KMI name {kmi!r} in {ko_dir}: expected "
+                             f"susfs_guard_lkm-android<release>-<kernel>.ko")
     if args.kmi_override and args.kmi_override not in kmis:
         raise SystemExit(f"--kmi-override {args.kmi_override!r} is not one of {kmis}")
     # epoch seconds: monotonic so two builds on one day still differ, and within int32 until 2038.
