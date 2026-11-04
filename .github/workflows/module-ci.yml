@@ -3,9 +3,9 @@ name: module-ci
 
 on:
   push:
-    paths: ['module/**', 'tools/pack_module.py', 'tools/test_pack.py', '.github/workflows/module-ci.yml']
+    paths: ['module/**', 'tools/pack_module.py', 'tools/test_pack.py', 'tools/cfi_sites.py', 'tools/test_cfi_sites.py', '.github/workflows/module-ci.yml']
   pull_request:
-    paths: ['module/**', 'tools/pack_module.py', 'tools/test_pack.py', '.github/workflows/module-ci.yml']
+    paths: ['module/**', 'tools/pack_module.py', 'tools/test_pack.py', 'tools/cfi_sites.py', 'tools/test_cfi_sites.py', '.github/workflows/module-ci.yml']
   workflow_dispatch:
 
 permissions:
@@ -29,6 +29,8 @@ jobs:
       - name: Shell syntax
         run: for s in module/*.sh; do sh -n "$s"; done
       - name: Byte-compile
-        run: python -m py_compile tools/pack_module.py tools/test_pack.py
+        run: python -m py_compile tools/*.py
       - name: Pack test
         run: python tools/test_pack.py
+      - name: CFI site test
+        run: python tools/test_cfi_sites.py
