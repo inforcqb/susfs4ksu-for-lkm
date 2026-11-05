@@ -18,10 +18,18 @@ for script in early-dispatch.sh load.sh post-fs-data.sh uninstall.sh; do
   set_perm "$MODPATH/$script" 0 0 0755
 done
 touch "$MODPATH/skip_mount"
-mkdir -p /data/adb/post-fs-data.d || abort "- cannot create common script directory."
-cp "$MODPATH/early-dispatch.sh" "$HOOK.tmp" || abort "- cannot stage early dispatcher."
-chmod 0755 "$HOOK.tmp" || abort "- cannot set dispatcher permissions."
-mv -f "$HOOK.tmp" "$HOOK" || abort "- cannot install early dispatcher."
+if mkdir -p /data/adb/post-fs-data.d; then
+  if cp "$MODPATH/early-dispatch.sh" "$HOOK.tmp" &&
+     chmod 0755 "$HOOK.tmp" &&
+     mv -f "$HOOK.tmp" "$HOOK"; then
+    ui_print "- early dispatcher installed"
+  else
+    rm -f "$HOOK.tmp"
+    ui_print "- warning: early dispatcher unavailable; module post-fs-data still loads"
+  fi
+else
+  ui_print "- warning: common script directory unavailable; module post-fs-data still loads"
+fi
 ui_print "- susfs_guard_lkm (arm64)"
 ui_print "- KMI is selected by the boot loader, not by this installer"
 ui_print "- Loader only; no rules are applied"
