@@ -1,4 +1,4 @@
-[English](README.en.md)
+[English](README.en.md) [![QQ 群 1125256073](https://img.shields.io/badge/QQ-1125256073-12B7F5?logo=qq&logoColor=white)](https://qm.qq.com/q/yMYVB9m0VO) 
 
 [x64设备兼容](https://github.com/ymuuuu/susfs4ksu-lkm-x64)
 
@@ -47,12 +47,6 @@ touch /data/adb/modules/susfs_guard_lkm/early_load
 ## 接口文档
 
 全部 `/proc` 控制节点，见 **[PROC_INTERFACES.md](PROC_INTERFACES.md)**。
-
-## 交流
-
-[![QQ 群 1125256073](https://img.shields.io/badge/QQ-1125256073-12B7F5?logo=qq&logoColor=white)](https://qm.qq.com/q/yMYVB9m0VO) [点击链接加入群聊【susfs-lkm交流群】](https://qm.qq.com/q/yMYVB9m0VO)
-
-使用问题、踩坑记录、版本反馈都欢迎在群里聊。
 
 ## License
 
