@@ -48,6 +48,12 @@ Use early loading when SUSFS rules or original kstat snapshots must be configure
 
 All `/proc` control nodes: see **[PROC_INTERFACES.en.md](PROC_INTERFACES.en.md)**.
 
+## Community
+
+[![QQ group 1125256073](https://img.shields.io/badge/QQ-1125256073-12B7F5?logo=qq&logoColor=white)](https://qm.qq.com/q/yMYVB9m0VO) [Join the group chat 【susfs-lkm交流群】](https://qm.qq.com/q/yMYVB9m0VO)
+
+Questions, pitfalls, and version feedback are all welcome there.
+
 ## License
 
 GPL-2.0, see [LICENSE](LICENSE). Ported from: [susfs4ksu](https://gitlab.com/simonpunk/susfs4ksu) (feature logic and hook points), [SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra) (`patch_memory` / `lsm_hook` / `symbol_resolver`).
