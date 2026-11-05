@@ -1,4 +1,6 @@
-[English](README.en.md) [![QQ 群 1125256073](https://img.shields.io/badge/QQ-1125256073-12B7F5?logo=qq&logoColor=white)](https://qm.qq.com/q/yMYVB9m0VO) 
+[English](README.en.md) 
+
+[![QQ 群 1125256073](https://img.shields.io/badge/QQ-1125256073-12B7F5?logo=qq&logoColor=white)](https://qm.qq.com/q/yMYVB9m0VO) 
 
 [x64设备兼容](https://github.com/ymuuuu/susfs4ksu-lkm-x64)
 
