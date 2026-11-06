@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: layering
+
+on:
+  push:
+    paths:
+      - 'kernel/**'
+      - 'tools/layer_manifest.json'
+      - 'tools/layer_baseline.json'
+      - 'tools/layer_allowlist.json'
+      - 'tools/layering_check.py'
+      - '.github/workflows/layering.yml'
+  pull_request:
+    paths:
+      - 'kernel/**'
+      - 'tools/layer_manifest.json'
+      - 'tools/layer_baseline.json'
+      - 'tools/layer_allowlist.json'
+      - 'tools/layering_check.py'
+      - '.github/workflows/layering.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Byte-compile
+        run: python -m py_compile tools/layering_check.py tools/test_layering.py
+      - name: Gate tests
+        run: python tools/test_layering.py
+      - name: Report layering violations
+        # Phase 0 is report-only.  Switch to --strict once each file budget is 0.
+        run: python tools/layering_check.py

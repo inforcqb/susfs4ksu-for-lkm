@@ -1,0 +1,278 @@
+{
+  "schema": 1,
+  "kmi": [
+    "android12-5.10",
+    "android13-5.10",
+    "android13-5.15",
+    "android14-5.15",
+    "android14-6.1",
+    "android15-6.6",
+    "android16-6.12",
+    "android17-6.18"
+  ],
+  "files": {
+    "kernel/btf_layout.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/btf_layout.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/fsnotify_lifetime.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/fsnotify_lifetime.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/imports_guard.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/ksu_allow_gate.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/ksu_allow_gate.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/ksu_umount_gate.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/ksu_umount_gate.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/lsm_hook.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/lsm_hook.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/patch_memory.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/patch_memory.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/spoof_cmdline.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/sus_dirent.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/sus_map.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/sus_mount.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/sus_mount_identity.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/sus_mount_identity.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/sus_mount_idmap.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/sus_mount_idmap.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/sus_mount_policy.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/sus_mount_policy.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/sus_path.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_abi.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_avc_spoof.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_create_data.c": {
+      "layer": "D",
+      "phase": 2,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_create_data.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_create_gate.c": {
+      "layer": "F",
+      "phase": 2,
+      "budget": 4,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_create_policy.c": {
+      "layer": "L",
+      "phase": 2,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_create_policy.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_create_vfs.c": {
+      "layer": "P",
+      "phase": 2,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_create_vfs.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_enable_log.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_fp_hook.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_fp_hook.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_hide_syms.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_kprobe.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_kstat.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_log.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_main.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_opath.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_opath.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_open_redirect.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_or_entry.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_or_entry.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_supercall.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_uname.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/symbol_resolver.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/symbol_resolver.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    }
+  }
+}
