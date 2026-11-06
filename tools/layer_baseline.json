@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "violations": [
+    {
+      "file": "kernel/susfs_create_policy.c",
+      "rule": "L_INCLUDE",
+      "symbol": "linux/dcache.h",
+      "owner": "phase2"
+    },
+    {
+      "file": "kernel/susfs_create_policy.c",
+      "rule": "L_INCLUDE",
+      "symbol": "linux/namei.h",
+      "owner": "phase2"
+    },
+    {
+      "file": "kernel/susfs_create_policy.c",
+      "rule": "L_INCLUDE",
+      "symbol": "linux/path.h",
+      "owner": "phase2"
+    },
+    {
+      "file": "kernel/susfs_create_policy.c",
+      "rule": "L_INCLUDE",
+      "symbol": "susfs_create_vfs.h",
+      "owner": "phase2"
+    },
+    {
+      "file": "kernel/susfs_create_policy.c",
+      "rule": "L_SYMBOL",
+      "symbol": "struct filename",
+      "owner": "phase2"
+    },
+    {
+      "file": "kernel/susfs_create_policy.c",
+      "rule": "L_SYMBOL",
+      "symbol": "struct path",
+      "owner": "phase2"
+    }
+  ]
+}
