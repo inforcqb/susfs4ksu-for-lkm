@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="160" viewBox="0 0 800 160" role="img" aria-label="susfs4ksu-lkm — SUSFS as a loadable kernel module">
+  <defs>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#12B7F5"/>
+      <stop offset="0.5" stop-color="#4D7CFF"/>
+      <stop offset="1" stop-color="#A855F7"/>
+    </linearGradient>
+    <linearGradient id="word" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#12B7F5"/>
+      <stop offset="0.45" stop-color="#4D7CFF"/>
+      <stop offset="1" stop-color="#A855F7"/>
+    </linearGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#12B7F5" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#A855F7" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- logo mark: loadable kernel module chip -->
+  <g>
+    <rect x="140" y="30" width="98" height="98" rx="26" fill="url(#brand)" fill-opacity="0.10" stroke="url(#brand)" stroke-width="2.6"/>
+    <g stroke="url(#brand)" stroke-width="3.4" stroke-linecap="round" fill="none">
+      <rect x="166" y="56" width="46" height="46" rx="10"/>
+      <rect x="180" y="70" width="18" height="18" rx="4"/>
+      <path d="M176 44v10M189 44v10M202 44v10M176 104v10M189 104v10M202 104v10"/>
+      <path d="M152 66h12M152 79h12M152 92h12M214 66h12M214 79h12M214 92h12"/>
+    </g>
+  </g>
+
+  <!-- decorative dots -->
+  <g fill="url(#brand)">
+    <circle cx="750" cy="48" r="4" opacity="0.45"/>
+    <circle cx="770" cy="80" r="2.6" opacity="0.30"/>
+    <circle cx="748" cy="112" r="2.6" opacity="0.30"/>
+  </g>
+
+  <!-- wordmark -->
+  <g font-family="'Segoe UI Black','Arial Black','Helvetica Neue',Arial,sans-serif" font-weight="900" text-anchor="start">
+    <text x="264" y="98" font-size="56" letter-spacing="2.4" fill="#0B1220" fill-opacity="0.20">susfs4ksu-lkm</text>
+    <text x="262" y="94" font-size="56" letter-spacing="2.4" fill="url(#word)" stroke="#0B1220" stroke-opacity="0.55" stroke-width="1.3" paint-order="stroke">susfs4ksu-lkm</text>
+  </g>
+
+  <!-- subtitle -->
+  <g font-family="'Segoe UI','Helvetica Neue',Arial,sans-serif" font-weight="600" fill="#8A94A6">
+    <text x="263" y="126" font-size="13.5" letter-spacing="6">SUSFS · LOADABLE KERNEL MODULE</text>
+  </g>
+
+  <!-- accent rule -->
+  <rect x="262" y="140" width="380" height="2" rx="1" fill="url(#rule)"/>
+</svg>
