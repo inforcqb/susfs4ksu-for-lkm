@@ -41,10 +41,21 @@ static void test_view_values(void)
 	assert(v.prefix_matched && v.path_truncated);
 }
 
+static void test_show_decision(void)
+{
+	struct sus_mount_view v = {0};
+
+	assert(sus_mount_show_decide(&v, false, false) == SUS_MOUNT_SHOW_VISIBLE);
+	assert(sus_mount_show_decide(&v, false, true) == SUS_MOUNT_SHOW_VISIBLE);
+	assert(sus_mount_show_decide(&v, true, true) == SUS_MOUNT_SHOW_VISIBLE);
+	assert(sus_mount_show_decide(&v, true, false) == SUS_MOUNT_SHOW_HIDE);
+}
+
 int main(void)
 {
 	test_context_bits();
 	test_view_values();
+	test_show_decision();
 	puts("sus_mount_view: ok");
 	return 0;
 }
