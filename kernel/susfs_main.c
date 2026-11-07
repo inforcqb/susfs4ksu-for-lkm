@@ -422,7 +422,9 @@ static int __init susfs_init(void)
         return -EINVAL;
 
     SUSFS_LOGI("init v%s\n", SUSFS_LKM_VERSION);
-    ksu_init_symbol_resolver();
+
+    if (ksu_init_symbol_resolver())
+        return -ENODATA;
 
     /* Now that kallsyms lookups work, check the addresses themselves: see imports_guard.c. */
     if (susfs_imports_crosscheck())
