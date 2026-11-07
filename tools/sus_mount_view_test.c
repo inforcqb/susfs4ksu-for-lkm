@@ -37,7 +37,7 @@ static void test_view_values(void)
 
 	v.ctx = SUS_MOUNT_CTX_SCAN;
 	v.path_truncated = true;
-	v.prefix_matched = true;
+	sus_mount_view_set_prefix(&v, true);
 	assert(v.prefix_matched && v.path_truncated);
 }
 
