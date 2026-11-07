@@ -7,13 +7,15 @@
 </p>
 <p align="center">
   <a href="https://qm.qq.com/q/yMYVB9m0VO">
-     <img alt="QQ 群 1125256073" src="https://img.shields.io/badge/QQ-1125256073-12B7F5?logo=qq&logoColor=white">
+    <img alt="QQ 群 1125256073" src="https://img.shields.io/badge/QQ-1125256073-12B7F5?logo=qq&logoColor=white">
   </a>
   
   <img alt="Android 12+" src="https://img.shields.io/badge/Android-12%2B-3DDC84?logo=android&logoColor=white">
   <img alt="arm64-v8a" src="https://img.shields.io/badge/arm64--v8a-6E7681?logo=arm&logoColor=white">
   <img alt="GKI 5.10 ~ 6.18" src="https://img.shields.io/badge/GKI-5.10%20~%206.18-1F6FEB?logo=linux&logoColor=white">
-  <img alt="KernelSU" src="https://img.shields.io/badge/KernelSU-LKM-12B7F5">
+  <a href="https://github.com/tiann/KernelSU">
+    <img alt="KernelSU" src="https://img.shields.io/badge/KernelSU-LKM-12B7F5">
+  </a>
   <img alt="GPL-2.0-Only" src="https://img.shields.io/badge/License-GPL--2.0-3DA639?logo=gnu&logoColor=white">
 </p>
 
