@@ -36,6 +36,10 @@ jobs:
         run: python -m py_compile tools/layering_check.py tools/test_layering.py
       - name: Gate tests
         run: python tools/test_layering.py
+      - name: sus_mount view host test
+        run: |
+          cc -std=c11 -Wall -Wextra -I kernel tools/sus_mount_view_test.c -o /tmp/test_sus_mount_view
+          /tmp/test_sus_mount_view
       - name: Report layering violations
         # Phase 0 is report-only.  Switch to --strict once each file budget is 0.
         run: python tools/layering_check.py
