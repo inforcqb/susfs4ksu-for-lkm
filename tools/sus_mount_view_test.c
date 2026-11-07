@@ -45,9 +45,9 @@ static void test_record_decision(void)
 {
 	struct sus_mount_view v = {0};
 
-	assert(sus_mount_record_decide(&v, false, false) == SUS_MOUNT_RECORD_SKIP);
-	assert(sus_mount_record_decide(&v, true, false) == SUS_MOUNT_RECORD_TAKE);
-	assert(sus_mount_record_decide(&v, false, true) == SUS_MOUNT_RECORD_TAKE);
+	assert(sus_mount_record_decide(&v, true, true) == SUS_MOUNT_RECORD_SKIP);
+	v.prefix_matched = true;
+	assert(sus_mount_record_decide(&v, false, false) == SUS_MOUNT_RECORD_TAKE);
 }
 
 static void test_path_set(void)
