@@ -14,7 +14,7 @@
   <img alt="arm64-v8a" src="https://img.shields.io/badge/arm64--v8a-6E7681?logo=arm&logoColor=white">
   <img alt="GKI 5.10 ~ 6.18" src="https://img.shields.io/badge/GKI-5.10%20~%206.18-1F6FEB?logo=linux&logoColor=white">
   <img alt="KernelSU" src="https://img.shields.io/badge/KernelSU-LKM-12B7F5">
-  <img alt="GPL-2.0" src="https://img.shields.io/badge/License-GPL--2.0-3DA639?logo=gnu&logoColor=white">
+  <img alt="GPL-2.0-Only" src="https://img.shields.io/badge/License-GPL--2.0-3DA639?logo=gnu&logoColor=white">
 </p>
 
 > 🚀 SUSFS 的**可加载内核模块（LKM）移植版**：让 susfs 可以在**不用重编译内核**的情况下运行。
