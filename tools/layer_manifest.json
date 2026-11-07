@@ -231,6 +231,13 @@
       "phase": 0,
       "budget": 999
     },
+    "kernel/susfs_create_view.h": {
+      "layer": "D",
+      "phase": 1,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
     "kernel/susfs_enable_log.c": {
       "layer": "legacy",
       "phase": 0,
