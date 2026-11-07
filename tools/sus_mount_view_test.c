@@ -50,6 +50,21 @@ static void test_record_decision(void)
 	assert(sus_mount_record_decide(&v, false, true) == SUS_MOUNT_RECORD_TAKE);
 }
 
+static void test_path_set(void)
+{
+	struct sus_mount_view v = {0};
+	char path[600];
+
+	memset(path, 'a', sizeof(path));
+	path[sizeof(path) - 1] = 0;
+	sus_mount_view_set_path(&v, path, sizeof(path) - 1);
+	assert(sus_mount_view_has(&v, SUS_MOUNT_V_PATH));
+	assert(v.path_truncated);
+	assert(v.path_len == SUS_MOUNT_VIEW_PATH_MAX - 1);
+	assert(v.mountpoint_path[v.path_len] == 0);
+	assert(v.source == SUS_MOUNT_SRC_PATH);
+}
+
 static void test_show_decision(void)
 {
 	struct sus_mount_view v = {0};
@@ -65,6 +80,7 @@ int main(void)
 	test_context_bits();
 	test_view_values();
 	test_record_decision();
+	test_path_set();
 	test_show_decision();
 	puts("sus_mount_view: ok");
 	return 0;
