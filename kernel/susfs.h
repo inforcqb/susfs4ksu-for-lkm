@@ -91,7 +91,7 @@ int sus_path_dirent_stat_line(char *buf, size_t size);
 
 /* The build's version string.  It lives here rather than in susfs_main.c because imports_guard.c
  * reports it when it refuses a load - and that happens before susfs_main.c prints its banner. */
-#define SUSFS_LKM_VERSION "2.3.0-gki"
+#define SUSFS_LKM_VERSION "2.4.0-gki"
 
 /* hide_modules (susfs_hide_syms.c): filters module NAMES out of /proc/modules (plus /sys/module and /proc/kallsyms for
  * non-root callers).  Node and same-named parameter are root-only; the node answers ENOENT through sus_path's hidden set. */
