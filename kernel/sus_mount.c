@@ -151,6 +151,12 @@
 #include "sus_mount_idmap.h"
 #include "sus_mount_policy.h"
 #include "sus_mount_view.h"
+#include "sus_mount_prefix.h"
+
+/* F keeps the rescan counter and the sysfs truncation reserve; the records are in D. */
+#define SUS_MOUNT_KEEP_TRUNC_RESERVE (SUS_MOUNT_KEEP_LEN + 64)
+static atomic_t n_keep_rescans = ATOMIC_INIT(0);
+#include "sus_mount_ns_iter.h"
 #include "ksu_allow_gate.h"	/* the control-node gate is su's own */
 #include "susfs_kprobe.h"
 
@@ -162,23 +168,6 @@
  * the control node may carry a whole list - it is bounded by SUS_MOUNT_KEEP_CMDLINE, i.e. 8352 bytes,
  * which is 64 entries of a 128-byte prefix - and the static cost of the two buffers below is roughly
  * 16 KB. */
-#define SUS_MOUNT_KEEP_MAX 64
-#define SUS_MOUNT_KEEP_LEN 128
-#define SUS_MOUNT_KEEP_CMDLINE (SUS_MOUNT_KEEP_MAX * (SUS_MOUNT_KEEP_LEN + 2) + 32)
-
-/* Room for one more full prefix line PLUS the "there is more" notice, in the sysfs read path.
- * Short of that, the notice is what gets cut: 64 prefixes of 127 characters stopped the loop 96 bytes
- * from the end, so the "N more; cat /proc/susfs_hide_mounts for all" text was itself truncated
- * mid-path and the final newline went with it - the read that needs the notice cannot print it.  One
- * more entry than strictly needed is deliberate: the notice's own length is not fixed. */
-#define SUS_MOUNT_KEEP_TRUNC_RESERVE (SUS_MOUNT_KEEP_LEN + 64)
-
-static char mount_keep[SUS_MOUNT_KEEP_MAX][SUS_MOUNT_KEEP_LEN];
-static int n_mount_keep;
-static DEFINE_SPINLOCK(mount_keep_lock);
-static const char *const mount_keep_default = "/data/adb/";
-static atomic_t n_keep_rescans = ATOMIC_INIT(0);
-
 /* How many of the three mount-table hooks (show_vfsstat / show_mountinfo /
  * show_vfsmnt) are armed; 3 is healthy.  1 or 2 means the feature hides fewer files
  * than it says, which must be visible rather than inferred (see
@@ -521,60 +510,22 @@ static atomic_t n_clone_refused_logged = ATOMIC_INIT(0);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 static struct rw_semaphore *sus_mount_namespace_sem;
-
-static bool sus_mount_ns_walk_begin(void)
-{
-    if (!sus_mount_namespace_sem)
-        return false;
-    down_read(sus_mount_namespace_sem);
-    return true;
-}
-
-static void sus_mount_ns_walk_end(void)
-{
-    up_read(sus_mount_namespace_sem);
-}
-
-#define SUS_MOUNT_ITER_TYPE		struct rb_node *
-#define SUS_MOUNT_ITER_FOR(ns, it)	for ((it) = rb_first(&(ns)->mounts); (it); (it) = rb_next(it))
-#define SUS_MOUNT_ITER_MOUNT(it)	rb_entry((it), struct mount, mnt_node)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
-#define SUS_MOUNT_MNT_NOT_IN_NS(r, ns)	((r)->mnt_ns != (ns) || !mnt_ns_attached(r))
-#else
-
-#define SUS_MOUNT_MNT_NOT_IN_NS(r, ns)	((r)->mnt_ns != (ns) || RB_EMPTY_NODE(&(r)->mnt_node))
-#endif
-#else
-static bool sus_mount_ns_walk_begin(void)
-{
-    return true;	/* the caller takes ns_lock instead */
-}
-
-static void sus_mount_ns_walk_end(void)
-{
-}
-
-#define SUS_MOUNT_ITER_TYPE		struct list_head *
-#define SUS_MOUNT_ITER_FOR(ns, it)	for ((it) = (ns)->list.next; (it) != &(ns)->list; (it) = (it)->next)
-#define SUS_MOUNT_ITER_MOUNT(it)	list_entry((it), struct mount, mnt_list)
-#define SUS_MOUNT_MNT_NOT_IN_NS(r, ns)	((r)->mnt_ns != (ns) || ((r)->mnt.mnt_flags & MNT_CURSOR))
 #endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 
 static void sus_mount_learn_ns(struct mnt_namespace *ns)
 {
-    SUS_MOUNT_ITER_TYPE pos;
+    struct sus_mount_ns_iter *iter;
     struct mount *r;
     int learned = 0;
 
-    spin_lock(&ns->ns_lock);
-    SUS_MOUNT_ITER_FOR(ns, pos) {
+    iter = sus_mount_ns_iter_begin(ns);
+    if (!iter)
+        return;
+    while ((r = sus_mount_ns_iter_next(iter))) {
         int shown;
 
-        r = SUS_MOUNT_ITER_MOUNT(pos);
-        if (SUS_MOUNT_MNT_NOT_IN_NS(r, ns))
-            continue;
         if (!sus_mount_is_ours(r, SUS_MOUNT_KSU_ID_MIN, sus_mount_path_is_ours))
             continue;
         if (sus_mount_idmap_shown_for((int)r->mnt_id))
@@ -585,7 +536,7 @@ static void sus_mount_learn_ns(struct mnt_namespace *ns)
             learned++;
         }
     }
-    spin_unlock(&ns->ns_lock);
+    sus_mount_ns_iter_end(iter);
     atomic_inc(&n_clone_walks);
     if (learned)
         atomic_add(learned, &n_clone_learned);
@@ -624,23 +575,20 @@ static struct mnt_namespace *sus_mount_learn_pop(void)
 
 static int sus_mount_learn_ns_walk(struct mnt_namespace *ns)
 {
-    SUS_MOUNT_ITER_TYPE pos;
+    struct sus_mount_ns_iter *iter;
+    struct mount *r;
     unsigned int seen = 0;
     int learned = 0;
 
-    if (!sus_mount_ns_walk_begin())
+    iter = sus_mount_ns_iter_begin(ns);
+    if (!iter)
         return -ENOSYS;
 
-    rcu_read_lock();
-    SUS_MOUNT_ITER_FOR(ns, pos) {
-        struct mount *r;
+    while ((r = sus_mount_ns_iter_next(iter))) {
         int shown;
 
         if (seen++ >= SUS_MOUNT_MAX_SCAN)
             break;
-        r = SUS_MOUNT_ITER_MOUNT(pos);
-        if (SUS_MOUNT_MNT_NOT_IN_NS(r, ns))
-            continue;
         if (!sus_mount_is_ours(r, SUS_MOUNT_KSU_ID_MIN, sus_mount_path_is_ours))
             continue;
         if (sus_mount_idmap_shown_for((int)r->mnt_id))
@@ -651,8 +599,7 @@ static int sus_mount_learn_ns_walk(struct mnt_namespace *ns)
             learned++;
         }
     }
-    rcu_read_unlock();
-    sus_mount_ns_walk_end();
+    sus_mount_ns_iter_end(iter);
     return learned;
 }
 
@@ -814,6 +761,7 @@ static bool sus_mount_should_record(struct mount *r, char *buf, int buflen, char
         if (path_ours)
             *why = dp;
     }
+    sus_mount_view_set_prefix(&view, devname_ours || path_ours);
     if (sus_mount_record_decide(&view, devname_ours, path_ours) !=
         SUS_MOUNT_RECORD_TAKE)
         return false;
@@ -1194,7 +1142,7 @@ static int sus_mount_stat_show(char *buf, const struct kernel_param *kp)
                      (int)kr_clone_ns_ok,
                      atomic_read(&n_newmnt_seen), atomic_read(&n_newmnt_recorded),
                      atomic_read(&n_newmnt_pathfail), (int)kr_newmnt_ok,
-                     n_mount_keep, atomic_read(&n_keep_rescans),
+                     sus_mount_prefix_count(), atomic_read(&n_keep_rescans),
                      n_fdinfo_probes,
                      atomic_read(&n_fdinfo_entry), atomic_read(&n_fdinfo_hits),
                      atomic_read(&n_fdinfo_rewrites),
@@ -1221,6 +1169,7 @@ static int sus_mount_show_pre(struct kprobe *kp, struct pt_regs *regs)
         return 0;
     r = real_mount(mnt);
     sus_mount_view_from_mount(&view, r, SUS_MOUNT_CTX_SHOW);
+    sus_mount_view_set_prefix(&view, sus_mount_path_is_ours(r->mnt_devname));
     /* Cheap path first, and NOT only the id: a KSU mount in a namespace the
      * marking scan never reached (the zygote's, hence every app's) keeps a normal
      * id - see the identity note above sus_mount_is_ours(). */
@@ -1303,24 +1252,7 @@ static bool sus_mount_show_armed[SUS_MOUNT_SHOW_N];
 /* Interrupt/kprobe safe: read-only, no allocation. */
 static bool sus_mount_path_is_ours(const char *s)
 {
-    unsigned long flags;
-    bool hit = false;
-    int i;
-
-    if (!s)
-        return false;
-
-    spin_lock_irqsave(&mount_keep_lock, flags);
-    for (i = 0; i < n_mount_keep; i++) {
-        size_t len = strlen(mount_keep[i]);
-
-        if (len && !strncmp(s, mount_keep[i], len)) {
-            hit = true;
-            break;
-        }
-    }
-    spin_unlock_irqrestore(&mount_keep_lock, flags);
-    return hit;
+    return sus_mount_prefix_match(s);
 }
 
 /* Retro-fit upstream's "KSU mounts carry an id >= DEFAULT_KSU_MNT_ID" onto the
@@ -1425,13 +1357,7 @@ static int sus_mount_keep_parse(const char *val, char dst[][SUS_MOUNT_KEEP_LEN],
 
 static void sus_mount_keep_commit(char dst[][SUS_MOUNT_KEEP_LEN], int n)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&mount_keep_lock, flags);
-	memset(mount_keep, 0, sizeof(mount_keep));
-	memcpy(mount_keep, dst, (size_t)n * SUS_MOUNT_KEEP_LEN);
-	n_mount_keep = n;
-	spin_unlock_irqrestore(&mount_keep_lock, flags);
+    (void)sus_mount_prefix_commit(dst, n);
 }
 
 static void sus_mount_keep_rescan(void)
@@ -1478,7 +1404,7 @@ static int sus_mount_keep_command(const char *val, bool bare_list)
 		cmd[i] = '\0';
 
 	if (!strcmp(cmd, "reset")) {
-		strscpy(staged[0], mount_keep_default, SUS_MOUNT_KEEP_LEN);
+		strscpy(staged[0], sus_mount_prefix_default(), SUS_MOUNT_KEEP_LEN);
 		sus_mount_keep_commit(staged, 1);
 		sus_mount_keep_rescan();
 		SUSFS_LOGI("sus_mount: prefix list reset to the default\n");
@@ -1511,12 +1437,7 @@ static int sus_mount_keep_command(const char *val, bool bare_list)
 			goto out;
 		}
 
-		spin_lock(&mount_keep_lock);
-		n = n_mount_keep;
-		if (n > SUS_MOUNT_KEEP_MAX)
-			n = SUS_MOUNT_KEEP_MAX;
-		memcpy(staged, mount_keep, (size_t)n * SUS_MOUNT_KEEP_LEN);
-		spin_unlock(&mount_keep_lock);
+		n = sus_mount_prefix_snapshot(staged);
 
 		{
 			bool found = false;
@@ -1582,19 +1503,7 @@ out:
  * reports 0 entries rather than quietly reading the live array unlocked. */
 static int sus_mount_keep_snapshot(char (*dst)[SUS_MOUNT_KEEP_LEN])
 {
-	unsigned long flags;
-	int n;
-
-	if (!dst)
-		return 0;
-	spin_lock_irqsave(&mount_keep_lock, flags);
-	n = n_mount_keep;
-	if (n > SUS_MOUNT_KEEP_MAX)
-		n = SUS_MOUNT_KEEP_MAX;
-	if (n > 0)
-		memcpy(dst, mount_keep, (size_t)n * SUS_MOUNT_KEEP_LEN);
-	spin_unlock_irqrestore(&mount_keep_lock, flags);
-	return n;
+    return sus_mount_prefix_snapshot(dst);
 }
 
 /* The list as one string, for the sysfs parameter read (whose buffer the kernel caps at PAGE_SIZE).
@@ -1659,7 +1568,7 @@ static void sus_mount_keep_show_seq(struct seq_file *m)
 /* ---- insmod parameters must not touch the guard-protected side --------------------------------
  * module_param_cb()'s setter runs during load_module()'s parse_args(), i.e. BEFORE susfs_init() has
  * reached susfs_imports_guard() and before this layer is up.  sus_mount_keep_command() is not
- * import-free: committing the list takes spin_lock_irqsave(&mount_keep_lock) and the rescan walks the
+ * import-free: committing the list takes the prefix data lock and the rescan walks the
  * mount namespace - and _raw_spin_lock_irqsave is one of the imports the guard's table covers
  * (imports_guard.c), so a loader that left it at zero jumped to address 0 before anything could refuse
  * the load.  The setter therefore validates the shape and caches the raw value, and
@@ -1856,7 +1765,8 @@ static int sus_mount_scan_ns(struct mnt_namespace *ns, char *buf, unsigned long 
      * batch, because at most one old id is produced per id consumed. */
     int replaced[SUS_MOUNT_ID_BATCH];
     int n_batch = 0, used = 0, n_replaced = 0;
-    SUS_MOUNT_ITER_TYPE pos;
+    struct sus_mount_ns_iter *iter;
+    struct mount *r;
     unsigned int seen = 0;
     int scan_logged = 0;
     int marked = 0;
@@ -1866,12 +1776,6 @@ static int sus_mount_scan_ns(struct mnt_namespace *ns, char *buf, unsigned long 
     unsigned int n_skipped_ns = 0, n_skipped_marked = 0;
     bool hit_cap = false;
     int i;
-
-    if (!sus_mount_ns_walk_begin()) {
-        pr_warn("sus_mount: namespace_sem could not be resolved at load time - refusing to walk ns %p without the lock the kernel's own mount-table iterator holds (mounts stay unmarked)\n",
-                ns);
-        return -ENOSYS;
-    }
 
     for (i = 0; i < SUS_MOUNT_ID_BATCH; i++) {
         int id = sus_mount_ida_alloc();
@@ -1887,19 +1791,20 @@ static int sus_mount_scan_ns(struct mnt_namespace *ns, char *buf, unsigned long 
         batch[n_batch++] = id;
     }
     if (!n_batch) {
-        pr_warn("sus_mount: could not allocate KSU-range ids for ns %p - that namespace is left unmarked\n",
-                ns);
-        sus_mount_ns_walk_end();
+        pr_warn("sus_mount: could not allocate KSU-range ids for ns %p - that namespace is left unmarked", ns);
         return 0;
     }
 
-    rcu_read_lock();
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-    spin_lock(&ns->ns_lock);
-#endif
-    SUS_MOUNT_ITER_FOR(ns, pos) {
+    iter = sus_mount_ns_iter_begin(ns);
+    if (!iter) {
+        pr_warn("sus_mount: could not lock ns %p for the mount scan (mounts stay unmarked)", ns);
+        for (i = 0; i < n_batch; i++)
+            sus_mount_ida_release(batch[i]);
+        return -ENOSYS;
+    }
+
+    while ((r = sus_mount_ns_iter_next(iter))) {
         struct path mnt_path;
-        struct mount *r;
         const char *shown;
         char *dp;
         int new_id;
@@ -1908,15 +1813,7 @@ static int sus_mount_scan_ns(struct mnt_namespace *ns, char *buf, unsigned long 
             hit_cap = true;
             break;
         }
-        r = SUS_MOUNT_ITER_MOUNT(pos);
-        /* proc_mounts cursors are fake mounts anchored in this same list
-         * (fs/namespace.c:678-681 mnt_is_cursor(), include/linux/mount.h:70): below
-         * 6.12 MNT_CURSOR is what keeps them out of the walk, from 6.12 on they are
-         * simply not in ns->mounts - both are what SUS_MOUNT_MNT_NOT_IN_NS() tests. */
-        if (SUS_MOUNT_MNT_NOT_IN_NS(r, ns)) {
-            n_skipped_ns++;
-            continue;
-        }
+        /* The iterator already filtered cursors and stale mounts. */
         /* Anything already carrying a KSU-range id: the idempotency guard for a re-enable (a
          * second id for the same mount would leak the first for its lifetime) AND the cover
          * for KernelSU's own mounts, which this kernel already hands such an id to - measured
@@ -1967,6 +1864,7 @@ static int sus_mount_scan_ns(struct mnt_namespace *ns, char *buf, unsigned long 
                     continue;
                 shown = dp;
             }
+            sus_mount_view_set_prefix(&view, devname_ours || path_ours);
             if (sus_mount_record_decide(&view, devname_ours, path_ours) !=
                 SUS_MOUNT_RECORD_TAKE)
                 continue;
@@ -1994,11 +1892,7 @@ static int sus_mount_scan_ns(struct mnt_namespace *ns, char *buf, unsigned long 
         sus_mount_ident_add(r, mount_dbg);
         marked++;
     }
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-    spin_unlock(&ns->ns_lock);
-#endif
-    rcu_read_unlock();
-    sus_mount_ns_walk_end();
+    sus_mount_ns_iter_end(iter);
 
     /* Hand back whatever the batch did not use. */
     for (i = used; i < n_batch; i++)
@@ -2159,6 +2053,7 @@ int susfs_sus_mount_init(void)
 #endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
     sus_mount_namespace_sem = (struct rw_semaphore *)find_kernel_symbol_exact("namespace_sem");
+    sus_mount_ns_iter_set_sem(sus_mount_namespace_sem);
     pfn_put_mnt_ns = (void *)find_kernel_symbol_exact("put_mnt_ns");
 #endif
 
@@ -2223,7 +2118,7 @@ int susfs_sus_mount_init(void)
          * (SUS_MOUNT_KEEP_MAX is 64 now), and commit() only copies the one row it is told about. */
         char staged[1][SUS_MOUNT_KEEP_LEN] = { { 0 } };
 
-        strscpy(staged[0], mount_keep_default, SUS_MOUNT_KEEP_LEN);
+        strscpy(staged[0], sus_mount_prefix_default(), SUS_MOUNT_KEEP_LEN);
         sus_mount_keep_commit(staged, 1);
     }
 

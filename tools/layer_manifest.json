@@ -116,6 +116,20 @@
       "phase": 0,
       "budget": 999
     },
+    "kernel/sus_mount_ns_iter.c": {
+      "layer": "P",
+      "phase": 1,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/sus_mount_ns_iter.h": {
+      "layer": "P",
+      "phase": 1,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
     "kernel/sus_mount_policy.c": {
       "layer": "legacy",
       "phase": 0,
@@ -125,6 +139,20 @@
       "layer": "legacy",
       "phase": 0,
       "budget": 999
+    },
+    "kernel/sus_mount_prefix.c": {
+      "layer": "D",
+      "phase": 1,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/sus_mount_prefix.h": {
+      "layer": "D",
+      "phase": 1,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
     },
     "kernel/sus_mount_view.c": {
       "layer": "P",

@@ -13,6 +13,7 @@
 #include <linux/mount.h>
 #include <linux/dcache.h>
 #include <linux/rcupdate.h>
+#include <linux/version.h>
 
 #include "mount.h"
 #include "sus_mount_view.h"
@@ -26,6 +27,11 @@ struct sus_mount_walk {
 	unsigned int depth;
 	bool ended;
 };
+
+static u32 sus_mount_ptr_cookie(const void *p)
+{
+	return p ? ((u32)((unsigned long)p >> 4) | 1u) : 0;
+}
 
 static void sus_mount_view_fill(struct sus_mount_view *out, struct mount *m,
 				     enum sus_mount_context ctx)
@@ -44,6 +50,20 @@ static void sus_mount_view_fill(struct sus_mount_view *out, struct mount *m,
 	if (m->mnt.mnt_sb) {
 		out->s_dev = m->mnt.mnt_sb->s_dev;
 		out->valid_mask |= SUS_MOUNT_V_DEVID;
+	}
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+	if (m->mnt.mnt_idmap) {
+		out->idmap_cookie = sus_mount_ptr_cookie(m->mnt.mnt_idmap);
+		out->valid_mask |= SUS_MOUNT_V_IDMAP_NS;
+	}
+#endif
+	if (m->mnt_ns) {
+		out->mnt_ns_cookie = sus_mount_ptr_cookie(m->mnt_ns);
+		out->valid_mask |= SUS_MOUNT_V_MNT_NS;
+		if (m->mnt_ns->user_ns) {
+			out->user_ns_cookie = sus_mount_ptr_cookie(m->mnt_ns->user_ns);
+			out->valid_mask |= SUS_MOUNT_V_USER_NS;
+		}
 	}
 	if (inode) {
 		out->root_ino = inode->i_ino;
