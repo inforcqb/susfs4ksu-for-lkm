@@ -11,7 +11,7 @@ static struct susfs_create_view base_view(enum susfs_create_state state)
 	struct susfs_create_view v;
 
 	memset(&v, 0, sizeof(v));
-	v.kind = SUSFS_CREATE_MKDIRAT;
+	v.kind = SUSFS_CREATE_VIEW_MKDIRAT;
 	v.state = state;
 	v.rule_matched = true;
 	v.hide_from_apps = true;
@@ -48,7 +48,7 @@ int main(void)
 	assert(d.action == SUSFS_CREATE_HIDE);
 	assert(d.need_parent_permission);
 
-	v.kind = SUSFS_CREATE_LINKAT;
+	v.kind = SUSFS_CREATE_VIEW_LINKAT;
 	v.link_old = true;
 	assert(susfs_create_decide_core(&v).action == SUSFS_CREATE_HIDE_OLD);
 
