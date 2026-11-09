@@ -8,10 +8,10 @@
 #define AT_FDCWD (-100)
 #define SYS_exit 1
 #define SYS_write 4
-#define SYS_mknodat 389
-#define SYS_mkdirat 390
-#define SYS_symlinkat 395
-#define SYS_linkat 396
+#define SYS_mknodat 324
+#define SYS_mkdirat 323
+#define SYS_symlinkat 331
+#define SYS_linkat 330
 
 static long sc6(long n, long a, long b, long c, long d, long e, long f)
 {
