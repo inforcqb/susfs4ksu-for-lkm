@@ -1,0 +1,18 @@
+{
+  "name": "SUSFS Guard LKM",
+  "short_name": "SUSFS LKM",
+  "description": "SUSFS 的可加载内核模块移植版，适用于 Android GKI / KernelSU。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#06090f",
+  "theme_color": "#06090f",
+  "icons": [
+    {
+      "src": "assets/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

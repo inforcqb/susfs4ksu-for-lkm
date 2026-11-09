@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>页面未找到 — SUSFS Guard LKM</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#06090f">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/styles.css">
+  <style>
+    .error-main {
+      display: grid;
+      place-items: center;
+      min-height: 100svh;
+      padding: 120px 24px 80px;
+      text-align: center;
+    }
+    .error-code {
+      color: transparent;
+      background: var(--gradient);
+      -webkit-background-clip: text;
+      background-clip: text;
+      font-family: var(--font-mono);
+      font-size: clamp(5rem, 20vw, 11rem);
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: -0.09em;
+    }
+    .error-main h1 {
+      margin-top: 16px;
+      font-size: clamp(1.7rem, 5vw, 2.6rem);
+      letter-spacing: -0.04em;
+    }
+    .error-main p {
+      max-width: 460px;
+      margin: 14px auto 28px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.85;
+    }
+    .error-actions {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+  </style>
+</head>
+<body>
+  <main class="error-main">
+    <div>
+      <div class="error-code" aria-hidden="true">404</div>
+      <h1>这个页面没有加载成功。</h1>
+      <p>链接可能已经移动，或者地址拼错了。回到首页，继续查看安装步骤、KMI 矩阵与接口文档。</p>
+      <div class="error-actions">
+        <a class="btn btn-primary" href="/susfs4ksu-lkm-site/">返回首页</a>
+        <a class="btn btn-secondary" href="https://github.com/supervooc/susfs4ksu-lkm" target="_blank" rel="noopener noreferrer">查看源码</a>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

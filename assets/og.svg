@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="SUSFS Guard LKM — SUSFS as a loadable kernel module">
+  <defs>
+    <linearGradient id="brand" x1="120" y1="90" x2="1080" y2="540" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67E8F9"/>
+      <stop offset=".48" stop-color="#6D9CFF"/>
+      <stop offset="1" stop-color="#A78BFA"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="72" y1="72" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67E8F9"/>
+      <stop offset=".55" stop-color="#6D9CFF"/>
+      <stop offset="1" stop-color="#A78BFA"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="0" cy="0" r="1" gradientTransform="translate(125 75) rotate(44) scale(420)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22D3EE" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#22D3EE" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0" cy="0" r="1" gradientTransform="translate(1110 585) rotate(-138) scale(430)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7C3AED" stop-opacity=".25"/>
+      <stop offset="1" stop-color="#7C3AED" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M64 0H0v64" fill="none" stroke="#94A3B8" stroke-opacity=".055"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="20" stdDeviation="22" flood-color="#000" flood-opacity=".42"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="630" fill="#06090F"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <rect width="1200" height="630" fill="url(#glowA)"/>
+  <rect width="1200" height="630" fill="url(#glowB)"/>
+  <rect x="24" y="24" width="1152" height="582" rx="28" fill="none" stroke="#94A3B8" stroke-opacity=".14"/>
+
+  <g transform="translate(72 63)">
+    <rect width="60" height="60" rx="15" fill="url(#mark)"/>
+    <rect x="17" y="17" width="26" height="26" rx="7" fill="#06101B"/>
+    <rect x="24" y="24" width="12" height="12" rx="3" fill="url(#mark)"/>
+    <g stroke="#06101B" stroke-width="2.4" stroke-linecap="round">
+      <path d="M22 4v7M30 4v7M38 4v7M22 49v7M30 49v7M38 49v7M4 22h7M4 30h7M4 38h7M49 22h7M49 30h7M49 38h7"/>
+    </g>
+  </g>
+  <text x="152" y="88" fill="#E9EFFB" font-family="'Segoe UI', Arial, sans-serif" font-size="27" font-weight="700" letter-spacing="-.4">SUSFS Guard LKM</text>
+  <text x="152" y="112" fill="#64748B" font-family="Consolas, monospace" font-size="11" letter-spacing="2.8">LOADABLE KERNEL MODULE</text>
+
+  <g transform="translate(72 181)">
+    <text fill="#E9EFFB" font-family="'Segoe UI', Arial, sans-serif" font-size="65" font-weight="750" letter-spacing="-2.8">No kernel rebuild.</text>
+    <text y="80" fill="url(#brand)" font-family="'Segoe UI', Arial, sans-serif" font-size="65" font-weight="750" letter-spacing="-2.8">Just load the module.</text>
+    <text y="137" fill="#94A3B8" font-family="'Segoe UI', 'Microsoft YaHei', sans-serif" font-size="20">SUSFS as an LKM for Android GKI · KernelSU / standalone loader</text>
+
+    <g transform="translate(0 181)" font-family="Consolas, monospace" font-size="13">
+      <rect x=".5" y=".5" width="166" height="34" rx="8" fill="#0D1727" stroke="#94A3B8" stroke-opacity=".18"/>
+      <circle cx="18" cy="17" r="3" fill="#34D399"/>
+      <text x="30" y="22" fill="#C7D2E5">Android 12+</text>
+
+      <rect x="178.5" y=".5" width="146" height="34" rx="8" fill="#0D1727" stroke="#94A3B8" stroke-opacity=".18"/>
+      <circle cx="196" cy="17" r="3" fill="#5B8CFF"/>
+      <text x="208" y="22" fill="#C7D2E5">arm64-v8a</text>
+
+      <rect x="336.5" y=".5" width="178" height="34" rx="8" fill="#0D1727" stroke="#94A3B8" stroke-opacity=".18"/>
+      <circle cx="354" cy="17" r="3" fill="#A78BFA"/>
+      <text x="366" y="22" fill="#C7D2E5">GKI 5.10–6.18</text>
+    </g>
+  </g>
+
+  <g transform="translate(696 176)" filter="url(#shadow)">
+    <rect width="432" height="281" rx="17" fill="#09111C" stroke="#94A3B8" stroke-opacity=".24"/>
+    <path d="M0 16A16 16 0 0 1 16 0h400a16 16 0 0 1 16 16v25H0V16Z" fill="#FFFFFF" fill-opacity=".025"/>
+    <path d="M0 41h432" stroke="#94A3B8" stroke-opacity=".14"/>
+    <circle cx="21" cy="21" r="4" fill="#F87171" fill-opacity=".8"/>
+    <circle cx="34" cy="21" r="4" fill="#FBBF24" fill-opacity=".75"/>
+    <circle cx="47" cy="21" r="4" fill="#34D399" fill-opacity=".75"/>
+    <text x="68" y="25" fill="#64748B" font-family="Consolas, monospace" font-size="9">susfs_guard_lkm · load</text>
+    <rect x="368" y="14" width="44" height="16" rx="4" fill="none" stroke="#94A3B8" stroke-opacity=".18"/>
+    <text x="379" y="25" fill="#64748B" font-family="Consolas, monospace" font-size="7">LKM</text>
+
+    <g font-family="Consolas, monospace" font-size="11.5">
+      <text x="22" y="78" fill="#22D3EE">$</text>
+      <text x="38" y="78" fill="#CBD5E1">ksud insmod /data/adb/loader/</text>
+      <text x="38" y="95" fill="#CBD5E1">susfs_guard_lkm.ko</text>
+
+      <text x="22" y="128" fill="#34D399" font-size="9">[ ok ]</text>
+      <text x="70" y="128" fill="#A7F3D0">module loaded</text>
+
+      <text x="22" y="153" fill="#34D399" font-size="9">[ ok ]</text>
+      <text x="70" y="153" fill="#A7F3D0">kmi matched </text>
+      <text x="150" y="153" fill="#D1FAE5">android15-6.6</text>
+
+      <text x="22" y="178" fill="#34D399" font-size="9">[ ok ]</text>
+      <text x="70" y="178" fill="#A7F3D0">expose_proc = 1</text>
+
+      <text x="22" y="203" fill="#64748B" font-size="9">[ .. ]</text>
+      <text x="70" y="203" fill="#64748B">waiting for susfs rules…</text>
+
+      <text x="22" y="236" fill="#22D3EE">$</text>
+      <rect x="38" y="225" width="7" height="13" fill="#22D3EE" opacity=".85"/>
+    </g>
+
+    <path d="M0 248h432" stroke="#94A3B8" stroke-opacity=".14"/>
+    <circle cx="23" cy="265" r="3" fill="#34D399"/>
+    <text x="34" y="269" fill="#64748B" font-family="Consolas, monospace" font-size="8">GKI 6.6 · arm64-v8a</text>
+    <text x="332" y="269" fill="#67E8F9" font-family="Consolas, monospace" font-size="8" opacity=".7">no kernel rebuild</text>
+  </g>
+
+  <g transform="translate(72 545)">
+    <path d="M0 0h18" stroke="#22D3EE" stroke-width="2"/>
+    <text x="29" y="4" fill="#64748B" font-family="Consolas, monospace" font-size="11" letter-spacing=".8">supervooc.github.io/susfs4ksu-lkm-site</text>
+  </g>
+  <text x="1128" y="549" fill="#64748B" font-family="Consolas, monospace" font-size="11" text-anchor="end" letter-spacing=".8">GPL-2.0-ONLY</text>
+</svg>
