@@ -44,6 +44,5 @@ jobs:
         run: |
           cc -std=c11 -Wall -Wextra -I kernel tools/susfs_create_view_test.c -o /tmp/test_susfs_create_view
           /tmp/test_susfs_create_view
-      - name: Report layering violations
-        # Phase 0 is report-only.  Switch to --strict once each file budget is 0.
-        run: python tools/layering_check.py
+      - name: Enforce layering
+        run: python tools/layering_check.py --strict
