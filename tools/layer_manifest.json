@@ -173,6 +173,13 @@
       "phase": 0,
       "budget": 999
     },
+    "kernel/sus_path_match.h": {
+      "layer": "D",
+      "phase": 2,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
     "kernel/susfs.h": {
       "layer": "legacy",
       "phase": 0,
