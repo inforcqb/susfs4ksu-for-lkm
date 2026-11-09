@@ -14,7 +14,11 @@ static struct susfs_create_view base_view(enum susfs_create_state state)
 	v.kind = SUSFS_CREATE_VIEW_MKDIRAT;
 	v.state = state;
 	v.rule_matched = true;
+	v.ordinary_rule = true;
 	v.hide_from_apps = true;
+	v.caller_is_app = true;
+	v.caller_uid = 10000;
+	v.i_uid = 0;
 	return v;
 }
 
@@ -41,7 +45,27 @@ int main(void)
 
 	v = base_view(SUSFS_CREATE_ST_EXISTS);
 	v.hide_from_apps = false;
+	assert(susfs_create_decide_core(&v).action == SUSFS_CREATE_HIDE);
+
+	v = base_view(SUSFS_CREATE_ST_EXISTS);
+	v.caller_is_app = false;
 	assert(susfs_create_decide_core(&v).action == SUSFS_CREATE_PASS);
+
+	v = base_view(SUSFS_CREATE_ST_EXISTS);
+	v.caller_uid = v.i_uid;
+	assert(susfs_create_decide_core(&v).action == SUSFS_CREATE_PASS);
+
+	v = base_view(SUSFS_CREATE_ST_EXISTS);
+	v.ordinary_rule = false;
+	v.self_protect = true;
+	v.control_visible = true;
+	assert(susfs_create_decide_core(&v).action == SUSFS_CREATE_PASS);
+
+	v = base_view(SUSFS_CREATE_ST_EXISTS);
+	v.ordinary_rule = false;
+	v.self_protect = true;
+	v.control_visible = false;
+	assert(susfs_create_decide_core(&v).action == SUSFS_CREATE_HIDE);
 
 	v = base_view(SUSFS_CREATE_ST_EXISTS);
 	d = susfs_create_decide_core(&v);
