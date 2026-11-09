@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: compat-create-test
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/compat_create_test.c'
+      - 'tools/compat_start.S'
+      - '.github/workflows/compat-create-test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install arm32 toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf
+      - name: Build freestanding arm32 helper
+        run: |
+          arm-linux-gnueabihf-gcc -marm -O2 -ffreestanding -fno-builtin \
+            -fno-stack-protector -nostdlib -static -Wl,-e,_start \
+            -o /tmp/compat-create-test tools/compat_start.S tools/compat_create_test.c -lgcc
+          file /tmp/compat-create-test
+          readelf -h /tmp/compat-create-test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compat-create-test
+          path: /tmp/compat-create-test
