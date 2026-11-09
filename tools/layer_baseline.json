@@ -1,11 +1,4 @@
 {
   "schema": 1,
-  "violations": [
-    {
-      "file": "kernel/susfs_create_policy.c",
-      "rule": "L_INCLUDE",
-      "symbol": "susfs_create_vfs.h",
-      "owner": "phase2"
-    }
-  ]
+  "violations": []
 }

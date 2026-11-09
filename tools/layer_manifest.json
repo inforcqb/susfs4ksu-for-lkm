@@ -173,6 +173,13 @@
       "phase": 0,
       "budget": 999
     },
+    "kernel/susfs_create_op.h": {
+      "layer": "P",
+      "phase": 2,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
     "kernel/sus_path_match.h": {
       "layer": "D",
       "phase": 2,
