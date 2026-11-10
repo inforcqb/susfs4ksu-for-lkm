@@ -94,17 +94,21 @@ static void putnum(long v)
 {
 	char buf[24];
 	char *p = buf + sizeof(buf);
-	unsigned long u;
+	unsigned long u = (unsigned long)v;
 	int neg = v < 0;
 
-	u = neg ? (unsigned long)(-v) : (unsigned long)v;
+	if (neg)
+		u = (unsigned long)(-v);
 	*--p = 0;
 	do {
-		*--p = (char)('0' + (u % 10));
-		u /= 10;
+		unsigned long d = u & 0xf;
+
+		*--p = (char)(d < 10 ? '0' + d : 'a' + d - 10);
+		u >>= 4;
 	} while (u);
 	if (neg)
 		*--p = '-';
+	puts("0x");
 	sc6(SYS_write, 1, (long)p, (long)slen(p), 0, 0, 0);
 }
 
