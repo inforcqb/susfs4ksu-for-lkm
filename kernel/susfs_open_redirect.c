@@ -12,7 +12,8 @@
  * filesystem that does not maintain it reports 0, which is no worse than matching the number alone).  The rule table
  * is a fixed array of SUS_OR_MAX slots that ARE reused: deleting or replacing a rule retires its slot, and the slot is
  * cleared and handed out again once a grace period has passed (or_reclaim_slot() - every reader copies what it needs
- * out of an entry under rcu_read_lock, which is what makes that safe).  susfs_open_redirect_rules counts live rules, so
+ * out of an entry under rcu_read_lock, which is what makes that safe).  Two fixed hash indexes (forward target and
+ * reverse redirected) keep the open/inode lookups O(1) average; the slot array itself stays the stable storage.  susfs_open_redirect_rules counts live rules, so
  * the name layer stops paying a lookup once the last rule is gone.
  * uid_scheme: enum UID_SCHEME (susfs_abi.h:67-73), all five values with upstream's predicates (susfs.c:941-964); two of
  * the five need state an LKM cannot read - see or_uid_matches() / or_in_su_domain().
@@ -52,6 +53,7 @@
 #include <linux/mm.h>		/* struct vm_area_struct (the maps reverse face) */
 #include <linux/kdev_t.h>	/* MAJOR/MINOR, to render dev:ino the way proc does */
 #include <linux/kernel.h>	/* scnprintf, for the same rendering */
+#include <linux/hash.h>	/* hash_64 for the rule indexes */
 #include <linux/security.h>	/* security_secctx_to_secid */
 #include "susfs_abi.h"
 #include "susfs_log.h"
@@ -62,7 +64,12 @@
 #include "susfs_kprobe.h"
 #include "susfs_or_entry.h"	/* susfs_or_entry_armed(): the forward direction lives there now */
 
-#define SUS_OR_MAX 64
+#define SUS_OR_MAX 512
+#define OR_HASH_BITS 10
+#define OR_HASH_BUCKETS (1U << OR_HASH_BITS)
+#define OR_BUCKET_MAX 13
+#define OR_INDEX_COUNT 2
+#define OR_REHASH_MAX 20
 /* The ABI fields are char[256]; matching that width stops a legal long path from being truncated into a rule for a
  * different path. */
 #define OR_PATH_MAX 256
@@ -139,8 +146,19 @@ struct sus_or_entry {
 	bool dead;
 };
 
+struct or_index {
+	u32 seed;
+	int buckets[OR_HASH_BUCKETS];
+	int rev_buckets[OR_HASH_BUCKETS];
+	int next[SUS_OR_MAX];
+	int rnext[SUS_OR_MAX];
+};
+
 static struct sus_or_entry or_entries[SUS_OR_MAX];
-static int nor;		/* highest index ever handed out, plus one: the scan bound */
+static struct or_index or_indexes[OR_INDEX_COUNT];
+static struct or_index *or_active_index;
+static unsigned int or_rehash_count;
+static int nor;		/* highest index ever handed out, plus one: the allocation bound */
 /* Slots that were handed out and have been taken back (or_reclaim_slot()).  A slot returns here once
  * a grace period has passed, which is what turns the UPPER BOUND into "how many rules exist at the
  * same time" instead of "how many times a rule was ever added". */
@@ -246,22 +264,177 @@ static struct sus_or_entry *or_find_by_path(const char *target)
 	return NULL;
 }
 
-static struct sus_or_entry *or_find_by_inode(unsigned long ino, dev_t dev, unsigned int gen)
+static u32 or_hash_key(const struct or_index *idx, unsigned long ino, dev_t dev)
+{
+	return (u32)hash_64((u64)ino ^ ((u64)dev << 32) ^ idx->seed, OR_HASH_BITS);
+}
+
+static void or_index_reset(struct or_index *idx, u32 seed)
 {
 	int i;
 
-	for (i = 0; i < READ_ONCE(nor); i++) {
+	idx->seed = seed;
+	for (i = 0; i < OR_HASH_BUCKETS; i++) {
+		idx->buckets[i] = -1;
+		idx->rev_buckets[i] = -1;
+	}
+	for (i = 0; i < SUS_OR_MAX; i++) {
+		idx->next[i] = -1;
+		idx->rnext[i] = -1;
+	}
+}
+
+/* Rebuild the inactive index from the live slots, then publish it and wait for the readers that
+ * were still using the old one.  Entries are unchanged, so the two indexes can coexist. */
+static void or_rehash_locked(void)
+{
+	struct or_index *old = or_active_index;
+	struct or_index *new;
+	u32 seed;
+	int attempt;
+
+	if (or_rehash_count >= OR_REHASH_MAX)
+		return;
+	or_rehash_count++;
+	if (or_rehash_count == OR_REHASH_MAX)
+		SUSFS_LOGI("open_redirect: rehash limit reached (%u) - keeping the current index until rmmod\n",
+			OR_REHASH_MAX);
+
+	new = (old == &or_indexes[0]) ? &or_indexes[1] : &or_indexes[0];
+	seed = old->seed;
+	for (attempt = 0; attempt < 4; attempt++) {
+		bool too_big = false;
+		int i;
+
+		seed = seed * 1664525u + 1013904223u;
+		or_index_reset(new, seed);
+		for (i = 0; i < nor; i++) {
+			struct sus_or_entry *e = &or_entries[i];
+			u32 h, rh;
+
+			if (READ_ONCE(e->dead))
+				continue;
+			h = or_hash_key(new, e->target_ino, e->target_dev);
+			new->next[i] = new->buckets[h];
+			new->buckets[h] = i;
+			rh = or_hash_key(new, e->redirected_ino, e->redirected_dev);
+			new->rnext[i] = new->rev_buckets[rh];
+			new->rev_buckets[rh] = i;
+		}
+		for (i = 0; i < OR_HASH_BUCKETS; i++) {
+			int chain = 0;
+			int j;
+
+			for (j = new->buckets[i]; j >= 0; j = new->next[j])
+				chain++;
+			if (chain >= OR_BUCKET_MAX) {
+				too_big = true;
+				break;
+			}
+		}
+		if (!too_big) {
+			for (i = 0; i < OR_HASH_BUCKETS; i++) {
+				int chain = 0;
+				int j;
+
+				for (j = new->rev_buckets[i]; j >= 0; j = new->rnext[j])
+					chain++;
+				if (chain >= OR_BUCKET_MAX) {
+					too_big = true;
+					break;
+				}
+			}
+		}
+		if (!too_big)
+			break;
+	}
+
+	rcu_assign_pointer(or_active_index, new);
+	synchronize_rcu();
+}
+
+/* Called with or_lock held. */
+static void or_unlink(struct sus_or_entry *e)
+{
+	struct or_index *idx = or_active_index;
+	u32 h = or_hash_key(idx, e->target_ino, e->target_dev);
+	u32 rh = or_hash_key(idx, e->redirected_ino, e->redirected_dev);
+	int *pp;
+	int i;
+
+	pp = &idx->buckets[h];
+	for (i = READ_ONCE(*pp); i >= 0; i = READ_ONCE(idx->next[i])) {
+		if (&or_entries[i] == e) {
+			WRITE_ONCE(*pp, idx->next[i]);
+			break;
+		}
+		pp = &idx->next[i];
+	}
+
+	pp = &idx->rev_buckets[rh];
+	for (i = READ_ONCE(*pp); i >= 0; i = READ_ONCE(idx->rnext[i])) {
+		if (&or_entries[i] == e) {
+			WRITE_ONCE(*pp, idx->rnext[i]);
+			break;
+		}
+		pp = &idx->rnext[i];
+	}
+}
+
+/* Append, never prepend: the old linear scan returned the oldest matching slot for rules that
+ * share one inode (hard links), and that order is observable through which rule wins. */
+static void or_link(struct sus_or_entry *e)
+{
+	struct or_index *idx = or_active_index;
+	u32 h = or_hash_key(idx, e->target_ino, e->target_dev);
+	u32 rh = or_hash_key(idx, e->redirected_ino, e->redirected_dev);
+	int *pp;
+	int count_f = 0, count_r = 0;
+	int slot = (int)(e - or_entries);
+
+	idx->next[slot] = -1;
+	idx->rnext[slot] = -1;
+	pp = &idx->buckets[h];
+	while (READ_ONCE(*pp) >= 0) {
+		pp = &idx->next[READ_ONCE(*pp)];
+		count_f++;
+	}
+	smp_store_release(pp, slot);
+
+	pp = &idx->rev_buckets[rh];
+	while (READ_ONCE(*pp) >= 0) {
+		pp = &idx->rnext[READ_ONCE(*pp)];
+		count_r++;
+	}
+	smp_store_release(pp, slot);
+
+	if ((count_f + 1 >= OR_BUCKET_MAX || count_r + 1 >= OR_BUCKET_MAX) &&
+	    READ_ONCE(or_rehash_count) < OR_REHASH_MAX)
+		or_rehash_locked();
+}
+
+static struct sus_or_entry *or_find_by_inode(unsigned long ino, dev_t dev, unsigned int gen)
+{
+	struct or_index *idx = rcu_dereference(or_active_index);
+	struct sus_or_entry *e;
+	u32 h = or_hash_key(idx, ino, dev);
+	int best = -1;
+	int i;
+
+	for (i = smp_load_acquire(&idx->buckets[h]); i >= 0; i = smp_load_acquire(&idx->next[i])) {
+		e = &or_entries[i];
 		/* dead is cleared LAST by the writer, so skipping dead entries also skips any entry whose
 		 * fields are still being written. */
-		if (READ_ONCE(or_entries[i].dead))
+		if (READ_ONCE(e->dead))
 			continue;
 		smp_rmb();
-		if (or_entries[i].target_ino == ino &&
-		    or_entries[i].target_dev == dev &&
-		    or_entries[i].target_igen == gen)
-			return &or_entries[i];
+		if (e->target_ino == ino &&
+		    e->target_dev == dev &&
+		    e->target_igen == gen &&
+		    (best < 0 || i < best))
+			best = i;
 	}
-	return NULL;
+	return best < 0 ? NULL : &or_entries[best];
 }
 
 /* The name-layer entry hook asks this one, with the path the caller is about to open: true when a live
@@ -297,18 +470,24 @@ bool susfs_open_redirect_match_path(const struct path *path, char *buf, size_t b
 /* Reverse direction: keyed on the redirected (really opened) inode, published like or_find_by_inode(). */
 static struct sus_or_entry *or_find_by_redirected_inode(unsigned long ino, dev_t dev, unsigned int gen)
 {
+	struct or_index *idx = rcu_dereference(or_active_index);
+	struct sus_or_entry *e;
+	u32 h = or_hash_key(idx, ino, dev);
+	int best = -1;
 	int i;
 
-	for (i = 0; i < READ_ONCE(nor); i++) {
-		if (READ_ONCE(or_entries[i].dead))
+	for (i = smp_load_acquire(&idx->rev_buckets[h]); i >= 0; i = smp_load_acquire(&idx->rnext[i])) {
+		e = &or_entries[i];
+		if (READ_ONCE(e->dead))
 			continue;
 		smp_rmb();
-		if (or_entries[i].redirected_ino == ino &&
-		    or_entries[i].redirected_dev == dev &&
-		    or_entries[i].redirected_igen == gen)
-			return &or_entries[i];
+		if (e->redirected_ino == ino &&
+		    e->redirected_dev == dev &&
+		    e->redirected_igen == gen &&
+		    (best < 0 || i < best))
+			best = i;
 	}
-	return NULL;
+	return best < 0 ? NULL : &or_entries[best];
 }
 
 /* Reverse direction for the one caller that has only numbers: /proc/<pid>/fdinfo/N prints "mnt_id:\t<i>" and "ino:\t<j>"
@@ -970,6 +1149,10 @@ int susfs_open_redirect_init(void)
 	 * the same state, or_add() can publish a slot by simply growing the bound, and no reader has to
 	 * order its load of `nor` against its load of `dead` (arm64 may reorder those two loads, so a
 	 * barrier in the writer would not have been enough - see the note in or_add()). */
+	or_index_reset(&or_indexes[0], (u32)(unsigned long)&or_entries);
+	or_index_reset(&or_indexes[1], (u32)(unsigned long)&or_entries + 1);
+	or_active_index = &or_indexes[0];
+	or_rehash_count = 0;
 	for (i = 0; i < SUS_OR_MAX; i++)
 		WRITE_ONCE(or_entries[i].dead, true);
 
@@ -1034,6 +1217,10 @@ void susfs_open_redirect_exit(void)
 	 * entry's cached struct path. */
 	for (i = 0; i < READ_ONCE(nor); i++)
 		or_entries[i].dead = true;
+	for (i = 0; i < OR_HASH_BUCKETS; i++) {
+		or_active_index->buckets[i] = -1;
+		or_active_index->rev_buckets[i] = -1;
+	}
 	nor = 0;
 	or_free_n = 0;		/* nothing is left to hand out: every slot is dead again */
 	WRITE_ONCE(susfs_open_redirect_rules, 0);	/* the count the name layer reads; hook is already gone */
@@ -1249,8 +1436,9 @@ static int or_add(const char *target, const char *redirected, int scheme)
 	e->redirected_igen = ri->i_generation;
 	e->spoofed_kstatfs = spoofed_kstatfs;
 	e->uid_scheme = scheme;
-	smp_wmb();
-	WRITE_ONCE(e->dead, false);	/* publish last: readers key off this */
+
+	WRITE_ONCE(e->dead, false);	/* fields are complete before the index publishes it */
+	or_link(e);
 
 	/* Both parsed paths are dropped right here: the entry keeps the numbers and the snapshot, and
 	 * the names as strings, so the rule holds nothing that a filesystem teardown would wait for. */
@@ -1303,6 +1491,7 @@ static void or_release_slot(struct sus_or_entry *e)
  * pointer into the table across a sleep. */
 static void or_reclaim_slot(struct sus_or_entry *e)
 {
+	or_unlink(e);
 	WRITE_ONCE(e->dead, true);
 	smp_wmb();
 	synchronize_rcu();
@@ -1316,28 +1505,33 @@ static void or_reclaim_slot(struct sus_or_entry *e)
  * waits once, not once per rule, and never hands a callee the inside of a table it is clearing. */
 static void or_clear_all(void)
 {
-	unsigned long marked = 0;
+	bool marked[SUS_OR_MAX] = { false };
+	bool any = false;
 	int i;
-
-	BUILD_BUG_ON(SUS_OR_MAX > BITS_PER_LONG);
 
 	for (i = 0; i < nor; i++) {
 		if (READ_ONCE(or_entries[i].dead))
 			continue;
 		WRITE_ONCE(or_entries[i].dead, true);
-		marked |= 1UL << i;
+		marked[i] = true;
+		any = true;
 	}
 
 	/* The live count drops before the wait, not after: the name-layer hook reads it on every open, and
 	 * every rule is already dead at this point - a lookup during the grace period would only resolve a
-	 * name to find nothing. */
+	 * name to find nothing.  The buckets are emptied here too; a reader that already took a head keeps
+	 * walking the stable entries until the grace period below. */
 	WRITE_ONCE(susfs_open_redirect_rules, 0);
+	for (i = 0; i < OR_HASH_BUCKETS; i++) {
+		WRITE_ONCE(or_active_index->buckets[i], -1);
+		WRITE_ONCE(or_active_index->rev_buckets[i], -1);
+	}
 
-	if (marked) {
+	if (any) {
 		smp_wmb();
 		synchronize_rcu();
 		for (i = 0; i < nor; i++) {
-			if (marked & (1UL << i))
+			if (marked[i])
 				or_release_slot(&or_entries[i]);
 		}
 	}
