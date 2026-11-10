@@ -187,6 +187,13 @@
       "allowed_includes": [],
       "allowed_symbols": []
     },
+    "kernel/sus_path_view.h": {
+      "layer": "L",
+      "phase": 3,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
     "kernel/susfs.h": {
       "layer": "legacy",
       "phase": 0,
