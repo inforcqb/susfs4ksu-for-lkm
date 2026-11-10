@@ -33,6 +33,34 @@ int main(void)
 	v = base_view(SUSFS_CREATE_ST_ABSENT);
 	assert(susfs_create_decide_core(&v).action == SUSFS_CREATE_PASS);
 
+	v = base_view(SUSFS_CREATE_ST_ABSENT);
+	v.pending = true;
+	assert(susfs_create_decide_core(&v).action == SUSFS_CREATE_HIDE);
+
+	v = base_view(SUSFS_CREATE_ST_ABSENT);
+	v.pending = true;
+	v.caller_is_app = false;
+	assert(susfs_create_decide_core(&v).action == SUSFS_CREATE_PASS);
+
+	v = base_view(SUSFS_CREATE_ST_ABSENT);
+	v.pending = true;
+	v.hide_from_apps = false;
+	assert(susfs_create_decide_core(&v).action == SUSFS_CREATE_HIDE);
+
+	v = base_view(SUSFS_CREATE_ST_ABSENT);
+	v.pending = true;
+	v.ordinary_rule = false;
+	v.self_protect = true;
+	v.control_visible = true;
+	assert(susfs_create_decide_core(&v).action == SUSFS_CREATE_PASS);
+
+	v = base_view(SUSFS_CREATE_ST_ABSENT);
+	v.pending = true;
+	v.ordinary_rule = false;
+	v.self_protect = true;
+	v.control_visible = false;
+	assert(susfs_create_decide_core(&v).action == SUSFS_CREATE_HIDE);
+
 	v = base_view(SUSFS_CREATE_ST_NOT_NAME);
 	assert(susfs_create_decide_core(&v).action == SUSFS_CREATE_NOT_NAME);
 
