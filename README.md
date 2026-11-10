@@ -59,7 +59,8 @@ touch /data/adb/modules/susfs_guard_lkm/early_load
 
 ## ⚖️ License
 
-GPL-2.0，见 [LICENSE](LICENSE)。
+GPL-2.0，见 [LICENSE](LICENSE)
+
 移植来源：[susfs4ksu](https://gitlab.com/simonpunk/susfs4ksu)（功能逻辑与 hook 点）
 
 [SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra)（`patch_memory` / `lsm_hook` / `symbol_resolver`）
