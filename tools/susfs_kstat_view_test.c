@@ -23,14 +23,30 @@ int main(void)
 	assert(susfs_kstat_decide_core(NULL) == SUSFS_KSTAT_SKIP);
 
 	v = base();
+	assert(susfs_kstat_gate_allowed(&v));
+
+	v = base();
+	assert(susfs_kstat_decide_core(&v) == SUSFS_KSTAT_SKIP);
+
+	v = base();
+	v.rule_matched = true;
+	v.spoof_flags = 1;
 	assert(susfs_kstat_decide_core(&v) == SUSFS_KSTAT_LOOKUP);
 
 	v = base();
+	v.rule_matched = true;
+	assert(susfs_kstat_decide_core(&v) == SUSFS_KSTAT_SKIP);
+
+	v = base();
 	v.table_empty = true;
+	v.rule_matched = true;
+	v.spoof_flags = 1;
 	assert(susfs_kstat_decide_core(&v) == SUSFS_KSTAT_SKIP);
 
 	v = base();
 	v.caller_is_umounted_app = false;
+	v.rule_matched = true;
+	v.spoof_flags = 1;
 	assert(susfs_kstat_decide_core(&v) == SUSFS_KSTAT_SKIP);
 
 	puts("susfs_kstat_view: ok");
