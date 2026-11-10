@@ -215,6 +215,13 @@
       "allowed_includes": [],
       "allowed_symbols": []
     },
+    "kernel/susfs_kstat_view.h": {
+      "layer": "L",
+      "phase": 5,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
     "kernel/susfs.h": {
       "layer": "legacy",
       "phase": 0,
