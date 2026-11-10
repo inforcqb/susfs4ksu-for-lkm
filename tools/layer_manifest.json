@@ -208,6 +208,13 @@
       "allowed_includes": [],
       "allowed_symbols": []
     },
+    "kernel/susfs_open_data.h": {
+      "layer": "D",
+      "phase": 4,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
     "kernel/susfs.h": {
       "layer": "legacy",
       "phase": 0,
