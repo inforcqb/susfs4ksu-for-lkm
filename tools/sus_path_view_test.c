@@ -71,6 +71,17 @@ int main(void)
 	v.control_visible = false;
 	assert(sus_path_decide_core(&v) == SUS_PATH_HIDE);
 
+	v = base(SUS_PATH_FACE_INODE);
+	v.self_protect = true;
+	v.control_visible = false;
+	assert(sus_path_decide_core(&v) == SUS_PATH_HIDE);
+
+	v = base(SUS_PATH_FACE_INODE);
+	v.user_rule = false;
+	v.self_protect = true;
+	v.control_visible = true;
+	assert(sus_path_decide_core(&v) == SUS_PATH_PASS);
+
 	puts("sus_path_view: ok");
 	return 0;
 }

@@ -187,6 +187,13 @@
       "allowed_includes": [],
       "allowed_symbols": []
     },
+    "kernel/sus_path_data.h": {
+      "layer": "D",
+      "phase": 3,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
     "kernel/sus_path_view.h": {
       "layer": "L",
       "phase": 3,
