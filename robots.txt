@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://supervooc.github.io/susfs4ksu-lkm-site/sitemap.xml
+Sitemap: https://inforcqb.github.io/susfs4ksu-for-lkm/sitemap.xml

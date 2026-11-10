@@ -1,9 +1,10 @@
 # SUSFS Guard LKM — 项目展示站
 
-基于 [`supervooc/susfs4ksu-lkm`](https://github.com/supervooc/susfs4ksu-lkm) 制作的独立静态展示站，面向 Android GKI / KernelSU 用户。
+基于 [`inforcqb/susfs4ksu-for-lkm`](https://github.com/inforcqb/susfs4ksu-for-lkm) 制作的静态展示站，面向 Android GKI / KernelSU 用户。
 
-- 线上地址：<https://supervooc.github.io/susfs4ksu-lkm-site/>
-- 上游项目：<https://github.com/inforcqb/susfs4ksu-for-lkm>
+- 线上地址：<https://inforcqb.github.io/susfs4ksu-for-lkm/>
+- 项目主仓库：<https://github.com/inforcqb/susfs4ksu-for-lkm>
+- 部署分支：`gh-pages`（不修改 `main` 中的模块源码）
 - 当前展示版本：`v2.3.0-r18.9`（上游 Release tag `v2.3.0-r18.9-1`）
 
 ## 内容
@@ -44,8 +45,8 @@ python -m http.server 8080
 
 ## 部署
 
-仓库使用 GitHub Pages 从 `main` 分支根目录发布。推送到 `main` 后，Pages 会自动重新构建。
+线上页面由 `inforcqb/susfs4ksu-for-lkm` 的独立 `gh-pages` 分支发布，`main` 中的模块源码不受影响。更新 `gh-pages` 分支后，GitHub Pages 会自动重新构建。
 
 ## 说明
 
-本站是独立展示页，不代表上游官方。模块源码与二进制遵循 GPL-2.0-only；站点只链接上游 Release，不镜像或重打包二进制文件。
+站点内容基于项目的 README 与 `/proc` 接口文档整理。模块源码和二进制遵循 GPL-2.0-only；站点只链接 GitHub Release，不镜像或重打包二进制文件。
