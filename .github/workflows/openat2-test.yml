@@ -19,10 +19,6 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Install cross toolchains
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
       - name: Build arm64 helper
         run: |
           aarch64-linux-gnu-gcc -O2 -ffreestanding -fno-builtin \
