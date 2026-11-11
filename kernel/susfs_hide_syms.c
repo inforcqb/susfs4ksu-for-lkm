@@ -19,6 +19,7 @@
 #include <linux/slab.h>		/* kvmalloc()/kvfree() on 6.1+ */
 #include <linux/mm.h>		/* kvmalloc()/kvfree() on 5.10-5.15 */
 #include "susfs_log.h"
+#include "susfs_bti.h"		/* the landing-pad list shared with susfs_fp_hook.c */
 #include "susfs.h"		/* sus_path_add_self_hidden / sus_path_del_path */
 #include "symbol_resolver.h"	/* find_kernel_symbol_exact (kallsyms_op) */
 #include "susfs_kprobe.h"	/* susfs_kp_forget_addr: a probe struct must be usable twice */
@@ -672,6 +673,32 @@ static struct kprobe kp_m_show = {
 
 static bool m_show_registered;
 
+/* Advance @addr past the landing pads a probe must not replace.  Returns 0 when a
+ * non-pad instruction was found, -EFAULT when the text cannot be read, and -EINVAL
+ * when the first SUSFS_ARM64_LANDING_PAD_MAX instructions are all pads: there is no
+ * body to probe, and arming on a pad is exactly what this exists to prevent. */
+static int hide_syms_skip_landing_pads(unsigned long *addr, unsigned int *skipped)
+{
+	unsigned long pc = *addr;
+	u32 insn;
+	unsigned int n;
+
+	for (n = 0; n < SUSFS_ARM64_LANDING_PAD_MAX; n++) {
+		if (copy_from_kernel_nofault(&insn, (void *)pc, sizeof(insn)))
+			return -EFAULT;
+		if (!susfs_arm64_is_landing_pad(insn))
+			break;
+		pc += sizeof(insn);
+	}
+	if (n == SUSFS_ARM64_LANDING_PAD_MAX)
+		return -EINVAL;
+
+	*addr = pc;
+	if (skipped)
+		*skipped = n;
+	return 0;
+}
+
 /* Which function is @op->show, and is it one a kprobe may be hung on?
  *
  * The table's pointer is the authoritative answer - the kernel calls exactly that - but it is not
@@ -712,13 +739,10 @@ static int __nocfi noinline hide_syms_resolve_show(struct kprobe *kp,
 	if (!ksu_symbol_is_start(show, symbol_name)) {
 
 		pc = show;
+		if (hide_syms_skip_landing_pads(&pc, NULL))
+			return -EINVAL;
 		if (copy_from_kernel_nofault(&insn, (void *)pc, sizeof(insn)))
 			return -EFAULT;
-		if (insn == 0xd503245f) {		/* bti c: the entry stub's landing pad */
-			pc += sizeof(insn);
-			if (copy_from_kernel_nofault(&insn, (void *)pc, sizeof(insn)))
-				return -EFAULT;
-		}
 		if ((insn & 0xfc000000) != 0x14000000)	/* not an unconditional branch: no jump to follow */
 			return -EINVAL;
 		target = pc + (long)((s32)(insn << 6) >> 4);
@@ -729,14 +753,20 @@ static int __nocfi noinline hide_syms_resolve_show(struct kprobe *kp,
 	}
 
 	/* The indirect call that reaches this function is BTI-checked.  A kprobe
-	 * breakpoint placed on the first instruction would overwrite the `bti c`
-	 * landing pad and turn every seq_read() of the file into a BTI fault.
-	 * Keep the landing pad and probe the instruction after it. */
-	if (!copy_from_kernel_nofault(&insn, (void *)target, sizeof(insn)) &&
-	    insn == 0xd503245f) {
-		target += sizeof(insn);
-		SUSFS_LOGI("susfs_hide_syms: %s.show BTI landing pad kept, probing %px\n",
-				table_name, (void *)target);
+	 * breakpoint placed on a landing pad would overwrite it and turn every
+	 * seq_read() of the file into a BTI fault.  Keep the pads and probe the first
+	 * instruction after them.  The pad is not always `bti c`: a pac-ret+bti build
+	 * emits `paciasp` alone (measured on 6.18: s_show and m_show both start with
+	 * it) and a CFI stub can carry `bti jc`, so the list lives in susfs_bti.h and
+	 * is shared with susfs_fp_hook.c instead of being spelled out here again. */
+	{
+		unsigned int skipped = 0;
+
+		if (hide_syms_skip_landing_pads(&target, &skipped))
+			return -EINVAL;
+		if (skipped)
+			SUSFS_LOGI("susfs_hide_syms: %s.show landing pad kept (%u insn), probing %px\n",
+					table_name, skipped, (void *)target);
 	}
 	kp->addr = (kprobe_opcode_t *)target;
 	*table_out = op;
