@@ -66,6 +66,7 @@
 
 #include "symbol_resolver.h"
 #include "susfs_log.h"
+#include "susfs_bti.h"
 #include "susfs.h"		/* susfs_control_node_allowed(), sus_path_inode_hidden_public() */
 #include "susfs_opath.h"
 #include "susfs_fp_hook.h"
@@ -89,16 +90,13 @@
  * though both slots hold the same function. */
 #define SUSFS_COMPAT_NR_OPENAT2		437
 
-/* The BTI landing pad an indirect call into this module has to land on.  fp_has_landing_pad()
- * in susfs_fp_hook.c is static and is what susfs_fp_install() refuses a wrapper with; the same
- * test is written out here so opath_dump can report it on the device for a wrapper that is not
- * installed at all - a dump whose answer only exists when the hook is already live would be
- * useless for the step it is meant for. */
-#define SUSFS_ARM64_BTI_C	0xd503245fu
-
+/* The landing pad an indirect call into this module has to land on.  The list lives in
+ * susfs_bti.h because three layers ask the same question (this dump, susfs_fp_install()'s
+ * refusal, and hide_syms' kprobe placement), and a copy per file is how `bti c` came to be
+ * the only pad two of them knew about. */
 static inline bool opath_has_landing_pad(const void *fn)
 {
-	return fn && READ_ONCE(*(const u32 *)fn) == SUSFS_ARM64_BTI_C;
+	return fn && susfs_arm64_is_landing_pad(READ_ONCE(*(const u32 *)fn));
 }
 
 /* Resolved by name at init and cached, exactly like sus_open_redirect.c does it.  fget_raw() is

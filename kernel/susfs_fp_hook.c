@@ -41,14 +41,8 @@
 #include "patch_memory.h"
 #include "symbol_resolver.h"
 #include "susfs_log.h"
+#include "susfs_bti.h"
 #include "susfs_fp_hook.h"
-
-/* The BTI landing pad of an indirect call target: 'bti c' (an unallocated HINT
- * on cores without BTI, so checking for it is correct either way). */
-#define SUSFS_ARM64_BTI_C	0xd503245fu
-#define SUSFS_ARM64_BTI_JC	0xd50324dfu
-#define SUSFS_ARM64_PACIASP	0xd503233fu
-#define SUSFS_ARM64_PACIBSP	0xd503237fu
 
 static susfs_syscall_fn_t *sys_call_table_ptr;
 static susfs_syscall_fn_t *compat_sys_call_table_ptr;
@@ -186,15 +180,7 @@ void susfs_fp_dump_wrapper(const char *name, const void *fn)
 
 static bool fp_has_landing_pad(const void *fn)
 {
-	switch (READ_ONCE(*(const u32 *)fn)) {
-	case SUSFS_ARM64_BTI_C:
-	case SUSFS_ARM64_BTI_JC:
-	case SUSFS_ARM64_PACIASP:
-	case SUSFS_ARM64_PACIBSP:
-		return true;
-	default:
-		return false;
-	}
+	return fn && susfs_arm64_is_landing_pad(READ_ONCE(*(const u32 *)fn));
 }
 
 /*

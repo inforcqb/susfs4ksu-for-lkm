@@ -188,6 +188,11 @@
       "phase": 0,
       "budget": 999
     },
+    "kernel/susfs_bti.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
     "kernel/susfs_create_data.c": {
       "layer": "D",
       "phase": 2,
