@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: openat2-test
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/openat2_test.c'
+      - 'tools/openat2_start_a64.S'
+      - 'tools/openat2_start_arm32.S'
+      - '.github/workflows/openat2-test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build arm64 helper
+        run: |
+          clang --target=aarch64-linux-gnu -O2 -ffreestanding -fno-builtin \
+            -fno-stack-protector -nostdlib -static -fuse-ld=lld -Wl,-e,_start \
+            -o /tmp/openat2-test-arm64 tools/openat2_start_a64.S tools/openat2_test.c
+          file /tmp/openat2-test-arm64
+      - name: Build arm32 helper
+        run: |
+          clang --target=armv7a-linux-gnueabihf -marm -O2 -ffreestanding -fno-builtin \
+            -fno-stack-protector -nostdlib -static -fuse-ld=lld -Wl,-e,_start \
+            -o /tmp/openat2-test-arm32 tools/openat2_start_arm32.S tools/openat2_test.c
+          file /tmp/openat2-test-arm32
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openat2-test
+          path: |
+            /tmp/openat2-test-arm64
+            /tmp/openat2-test-arm32
