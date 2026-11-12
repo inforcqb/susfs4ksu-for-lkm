@@ -572,6 +572,18 @@ static bool hide_syms_iter_plausible(const struct kallsym_iter_local *it)
 	return strnlen(it->module_name, sizeof(it->module_name)) < sizeof(it->module_name);
 }
 
+/* `hint #7` is XPACLRI: it strips the PAC signature from LR without touching
+ * SP, so a handler that parks the PC on LR after a paciasp/pacibsp landing pad
+ * gets the real return address.  On a CPU without pointer auth the hint is a
+ * no-op and an unsigned LR is left alone. */
+static inline unsigned long hide_syms_pac_strip(unsigned long v)
+{
+	register unsigned long lr asm("x30") = v;
+
+	asm("hint #7" : "+r"(lr));
+	return lr;
+}
+
 /* s_show(m, p): m is arg #1 (x0), read through the same accessor the m_show handler below uses
  * (on arm64 regs_get_kernel_argument(regs, n) is regs->regs[n] - the two spellings are the same
  * register, this one is just harder to get wrong if the prototype ever changes). */
@@ -608,12 +620,14 @@ static int hide_syms_s_show_pre(struct kprobe *kp, struct pt_regs *regs)
 	if (name_should_hide(iter->name)) {
 		atomic_inc(&hide_hit_count);
 		regs->regs[0] = 0;              /* s_show returns 0 */
+		regs->regs[30] = hide_syms_pac_strip(regs->regs[30]);
 		regs->pc = regs->regs[30];      /* skip the line */
 		return 1;
 	}
 	if (iter->module_name[0] && hide_module_name_match(iter->module_name)) {
 		atomic_inc(&n_kallsyms_mod_skipped);
 		regs->regs[0] = 0;
+		regs->regs[30] = hide_syms_pac_strip(regs->regs[30]);
 		regs->pc = regs->regs[30];
 		return 1;
 	}
@@ -663,6 +677,7 @@ static int hide_syms_m_show_pre(struct kprobe *kp, struct pt_regs *regs)
 
 	atomic_inc(&n_modlines_skipped);
 	regs_set_return_value(regs, 0);		/* no output for this entry */
+	regs->regs[30] = hide_syms_pac_strip(regs->regs[30]);
 	regs->pc = regs->regs[30];
 	return 1;
 }
