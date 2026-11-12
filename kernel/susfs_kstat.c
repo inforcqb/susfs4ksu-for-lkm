@@ -571,10 +571,10 @@ static long kstat_unlisted_seen[KSTAT_UNLISTED_SEEN];
 
 static void kstat_note_unlisted(long nr)
 {
-	int slot;
+	unsigned int slot;
 
 	atomic_inc(&n_kstat_unlisted);
-	slot = atomic_inc_return(&kstat_unlisted_next) - 1;
+	slot = (unsigned int)atomic_inc_return(&kstat_unlisted_next) - 1;
 	kstat_unlisted_seen[slot % KSTAT_UNLISTED_SEEN] = nr;
 }
 
