@@ -396,6 +396,11 @@
       "layer": "legacy",
       "phase": 0,
       "budget": 999
+    },
+    "kernel/susfs_hooks.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
     }
   }
 }
