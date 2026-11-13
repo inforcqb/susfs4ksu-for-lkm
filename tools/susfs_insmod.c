@@ -811,11 +811,14 @@ static int modinfo_lookup(char *base, u64 size, const char *key, char **val, u64
  */
 
 struct hit_probe {
-	const char *symbol;
-	const char *event;
+	char symbol[32];
+	char event[16];
 	u32 count;
 };
 
+/* Fixed arrays, not pointers into .rodata: this is a freestanding static PIE
+ * with a custom _start, so no startup code applies R_AARCH64_RELATIVE.  A pointer
+ * table here would be an unrelocated link-time address on device. */
 static struct hit_probe hit_probes[] = {
 	{ "vfs_open",       "sp_vfs",    0 },
 	{ "path_openat",    "sp_path",   0 },
