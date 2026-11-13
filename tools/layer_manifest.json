@@ -381,6 +381,16 @@
       "layer": "legacy",
       "phase": 0,
       "budget": 999
+    },
+    "kernel/susfs_hook_engine.c": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_hook_engine.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
     }
   }
 }
