@@ -64,6 +64,27 @@ typedef unsigned int u32;
 typedef unsigned long long u64;
 typedef long s64;
 
+/* Shared with the kernel map ABI.  The slot list is the same macro the module
+ * includes, so the loader cannot drift from the bit order. */
+#include "../kernel/susfs_hook_slots.h"
+
+enum {
+#define SUSFS_HOOK_ENUM(name, sym)	SUSFS_HOOK_##name,
+	SUSFS_HOOK_SLOTS(SUSFS_HOOK_ENUM)
+#undef SUSFS_HOOK_ENUM
+	SUSFS_HOOK_SLOT_COUNT
+};
+#define SUSFS_HOOK_WORDS	((SUSFS_HOOK_SLOT_COUNT + 31) / 32)
+#define SUSFS_HOOK_MAP_ABI	1u
+#define SUSFS_HOOK_MAP_READY	0x53484650u
+
+struct loader_hook_map {
+	u32 ready;
+	u32 abi;
+	u32 nbits;
+	u32 bits[SUSFS_HOOK_WORDS];
+};
+
 /* The type a syscall number, argument and return value travels in: pointer-sized.
  * On the target it is plain `long`; a host build (SUSFS_INSMOD_HOSTTEST) must also
  * be able to hand a pointer through it, so it is spelled the compiler's way. */
@@ -347,6 +368,7 @@ static sysarg find_sub(const char *hay, u64 hlen, const char *needle, u64 nlen)
 #define ELFDATA2LSB	1
 #define EM_AARCH64	183
 
+#define SHT_NOBITS	8
 #define SHT_PROGBITS	1
 #define SHT_SYMTAB	2
 #define SHT_STRTAB	3
@@ -811,19 +833,21 @@ static int modinfo_lookup(char *base, u64 size, const char *key, char **val, u64
  */
 
 struct hit_probe {
-	char symbol[32];
-	char event[16];
+	char symbol[40];
+	char event[40];
 	u32 count;
 };
 
 /* Fixed arrays, not pointers into .rodata: this is a freestanding static PIE
  * with a custom _start, so no startup code applies R_AARCH64_RELATIVE.  A pointer
  * table here would be an unrelocated link-time address on device. */
+#define PROBE_ROW(name, sym) { #sym, "sp_" #name, 0 },
 static struct hit_probe hit_probes[] = {
-	{ "vfs_open",       "sp_vfs",    0 },
-	{ "path_openat",    "sp_path",   0 },
-	{ "do_dentry_open", "sp_dentry", 0 },
+	SUSFS_HOOK_SLOTS(PROBE_ROW)
 };
+#undef PROBE_ROW
+
+static u32 probe_bits;
 
 #define TRACE_ROOT "/sys/kernel/tracing/"
 #define TRACE_ALT  "/sys/kernel/debug/tracing/"
@@ -1050,6 +1074,10 @@ static int probe_hits(void)
 			o_dec(hit_probes[i].count);
 			o_put("\n");
 		}
+		probe_bits = 0;
+		for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]) && i < 32; i++)
+			if (hit_probes[i].count)
+				probe_bits |= (u32)1 << i;
 		o_flush();
 		rc = 0;
 	}
@@ -1058,6 +1086,60 @@ out:
 	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++)
 		probe_finish(&hit_probes[i], root);
 	return rc;
+}
+
+/* Write probe_bits into the module's .data.susfs_hook_map.  The symbol lookup is
+ * the same ELF .symtab the loader already validates; the map is in an allocated
+ * PROGBITS section, so its file offset is section->sh_offset + (st_value - sh_addr).
+ * ready is written last: a failed or partial patch leaves the default-0 map and
+ * the module falls back to the current mechanisms. */
+static int patch_hook_map(char *img, u64 size, struct elf64_shdr *shdrs,
+			  u64 shnum, struct elf64_shdr *symtab,
+			  struct elf64_shdr *strtab)
+{
+	const char name[] = "susfs_hook_map";
+	u64 nsyms = symtab->sh_size / sizeof(struct elf64_sym);
+	u64 i;
+
+	for (i = 1; i < nsyms; i++) {
+		struct elf64_sym *sym = (struct elf64_sym *)(img + symtab->sh_offset) + i;
+		struct elf64_shdr *sec;
+		struct loader_hook_map *map;
+		u64 off, nlen = 0, j;
+
+		if (sym->st_shndx == SHN_UNDEF || sym->st_shndx >= shnum ||
+		    sym->st_name >= strtab->sh_size)
+			continue;
+		if (!s_eq_n(img + strtab->sh_offset + sym->st_name, name, sizeof(name) - 1))
+			continue;
+		j = strtab->sh_size - sym->st_name;
+		while (nlen < j && img[strtab->sh_offset + sym->st_name + nlen])
+			nlen++;
+		if (nlen != sizeof(name) - 1)
+			continue;
+		sec = &shdrs[sym->st_shndx];
+		if (sec->sh_type == SHT_NOBITS || !sec_in_image(sec, size))
+			return -1;
+		off = sec->sh_offset + (sym->st_value - sec->sh_addr);
+		if (off > size || sizeof(*map) > size - off)
+			return -1;
+		map = (struct loader_hook_map *)(img + off);
+		map->abi = SUSFS_HOOK_MAP_ABI;
+		map->nbits = SUSFS_HOOK_SLOT_COUNT;
+		for (j = 0; j < SUSFS_HOOK_WORDS; j++)
+			map->bits[j] = 0;
+		map->bits[0] = probe_bits;
+		__sync_synchronize();
+		map->ready = SUSFS_HOOK_MAP_READY;
+		o_put(P "hook map patched: ");
+		o_hex(probe_bits);
+		o_put(" -> ");
+		o_put(name);
+		o_put("\n");
+		o_flush();
+		return 0;
+	}
+	return -1;
 }
 
 /* -------------------------------------------------------------------------- *
@@ -1095,13 +1177,19 @@ void insmod_main(long argc, char **argv)
 	u32 resolved = 0, unresolved = 0, unresolved_weak = 0, unresolved_hard = 0;
 	u32 listed = 0, bad_sym = 0;
 	int retried = 0;
+	int do_probe = 0;
+	int probe_only = 0;
 
 	/* ---- argv ---- */
 	u = 1;
 	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'p' && argv[u][2] == 0) {
-		if (probe_hits())
-			finish(1);
-		finish(0);
+		do_probe = 1;
+		u++;
+	}
+	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'P' && argv[u][2] == 0) {
+		do_probe = 1;
+		probe_only = 1;
+		u++;
 	}
 	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'v' && argv[u][2] == 0) {
 		verbose = 1;
@@ -1212,6 +1300,23 @@ void insmod_main(long argc, char **argv)
 		o_dec(strtab->sh_size);
 		o_put(" bytes)\n");
 		o_flush();
+	}
+
+	if (do_probe) {
+		int pr = probe_hits();
+
+		if (pr) {
+			o_put(P "probe failed; module map stays default-0 (fallback)\n");
+			o_flush();
+			if (probe_only)
+				finish(1);
+		} else if (patch_hook_map(img, (u64)size, shdrs, eh->e_shnum,
+					 symtab, strtab)) {
+			o_put(P "hook map symbol not found; module map stays default-0\n");
+			o_flush();
+		}
+		if (probe_only)
+			finish(0);
 	}
 
 	/* ---- collect the undefined symbols ---- */
