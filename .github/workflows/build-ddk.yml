@@ -906,37 +906,19 @@ jobs:
           path: /tmp/susfs_stat
           if-no-files-found: error
 
-      # The loading half of this project: it loads the .ko on a stock vendor kernel WITHOUT ksud, by rewriting every
-      # undefined symbol of the image to st_shndx=SHN_ABS / st_value=<kallsyms address> before init_module(2), so the
-      # kernel's SHN_UNDEF branch (resolve_symbol -> export lookup, namespace import, CRC check, KMI whitelist) is never
-      # entered at all.  See the source header.
-      - name: Build module loader (no-ksud insmod)
-        run: |
-          set -e
-          clang --target=aarch64-linux-gnu -O2 -nostdlib -static-pie \
-                -fno-stack-protector -fno-builtin -fuse-ld=lld -Wl,-e,_start \
-                -o /tmp/susfs_insmod tools/susfs_insmod.c
-          file /tmp/susfs_insmod
-          ls -la /tmp/susfs_insmod
-
       # The rule about which kallsyms record a name may come from is tested on the runner:
-      # no kernel and no device needed.
+      # no kernel and no device needed.  The loader itself is NOT built here any more: the DDK
+      # clang is for the .ko, and a userspace client belongs on the NDK (see tools-ndk), which
+      # is the only producer of the loader every packaging path takes.
       - name: Match-rule test (host)
         run: |
           set -e
           cc -O1 -o /tmp/insmod_match_test tools/insmod_match_test.c
           /tmp/insmod_match_test
 
-      - name: Upload module loader
-        uses: actions/upload-artifact@v6
-        with:
-          name: susfs_insmod
-          path: /tmp/susfs_insmod
-          if-no-files-found: error
-
-  # The same loader with the Android NDK instead of the DDK clang.  The DDK toolchain is
-  # for the .ko; a userspace client belongs on the NDK's API-leveled clang/lld and its
-  # llvm-symbolizer.  This job is separate so both artifacts can be compared on device.
+  # The project's loader, built with the Android NDK rather than the DDK clang.  The DDK
+  # toolchain is for the .ko; a userspace client belongs on the NDK's API-leveled clang/lld
+  # and its llvm-symbolizer.  This is the only artifact the module ZIP and the release take.
   tools-ndk:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -976,7 +958,7 @@ jobs:
   # no release existing yet.  Attaching the same ZIP to a published release is still done by
   # module-zip.yml, which calls the same tools/pack_module.py - one packer, two callers.
   module-zip:
-    needs: [module, tools]
+    needs: [module, tools-ndk]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -994,11 +976,16 @@ jobs:
           pattern: 'susfs_guard_lkm.ko-*'
           path: ko
 
+      # The NDK build is the only loader producer; its artifact carries susfs_insmod_ndk,
+      # renamed here to the path the packer and the module scripts expect.
       - name: Collect the loader
         uses: actions/download-artifact@v4
         with:
-          name: susfs_insmod
+          name: susfs_insmod-ndk
           path: bin
+
+      - name: Name the loader
+        run: mv bin/susfs_insmod_ndk bin/susfs_insmod
 
       - name: Name the modules after their KMI
         run: |

@@ -66,14 +66,16 @@ jobs:
           mkdir -p build assets
           gh run download "$RUN" --repo "${{ github.repository }}" \
             --pattern 'susfs_guard_lkm.ko-*' --dir build
-          # A single --name download extracts the artifact's files directly into --dir.
+          # A single --name download extracts the artifact's files directly into --dir.  The
+          # loader is the NDK build (tools-ndk); it is renamed to the path the packer and the
+          # module scripts expect.
           gh run download "$RUN" --repo "${{ github.repository }}" \
-            --name susfs_insmod --dir build/loader
+            --name susfs_insmod-ndk --dir build/loader
           for d in build/susfs_guard_lkm.ko-*; do
             kmi="${d#build/susfs_guard_lkm.ko-}"
             cp "$d/susfs_guard_lkm.ko" "assets/susfs_guard_lkm-$kmi.ko"
           done
-          cp build/loader/susfs_insmod assets/susfs_insmod
+          cp build/loader/susfs_insmod_ndk assets/susfs_insmod
           ls -l assets
       - name: Collect the toolchain images
         run: |
