@@ -860,6 +860,7 @@ static struct hit_probe hit_probes[] = {
 #undef PROBE_ROW
 
 static u32 probe_bits;
+#define PROBE_ROUNDS 1000
 
 #define TRACE_ROOT "/sys/kernel/tracing/"
 #define TRACE_ALT  "/sys/kernel/debug/tracing/"
@@ -1135,7 +1136,7 @@ static void trigger_open(const char *path)
 		sys6(SYS_close, fd, 0, 0, 0, 0, 0);
 }
 
-static void probe_trigger(void)
+static void probe_trigger_cheap(void)
 {
 	/* open family: vfs_open, path_openat, d_path */
 	trigger_open("/system/build.prop");
@@ -1159,8 +1160,6 @@ static void probe_trigger(void)
 	trigger_readlink("/proc/self/fd/0");
 	trigger_readlink("/proc/self/exe");
 	trigger_process_vm();
-	if (!trigger_unshare())
-		trigger_mount();
 	trigger_map_files();
 }
 
@@ -1182,11 +1181,46 @@ static void trigger_mount(void)
 	(void)sys6(SYS_unlinkat, AT_FDCWD, (sysarg)mnt, 0, 0, 0, 0);
 }
 
+static void probe_trigger_ns(void)
+{
+	if (!trigger_unshare())
+		trigger_mount();
+}
+
+static int count_trace(const char *root)
+{
+	char path[256], needle[64];
+	static char trace[65536];
+	u64 total = 0, i, n;
+	sysarg fd;
+
+	probe_path(path, sizeof(path), root, "trace");
+	fd = xopen(path, O_RDONLY);
+	if (fd < 0)
+		return -1;
+	while (total < sizeof(trace)) {
+		sysarg r = sys6(SYS_read, fd, (sysarg)(trace + total),
+				(sysarg)(sizeof(trace) - total), 0, 0, 0);
+		if (r <= 0)
+			break;
+		total += (u64)r;
+	}
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+
+	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++) {
+		n = 0;
+		for (u64 j = 0; hit_probes[i].event[j]; j++)
+			needle[n++] = hit_probes[i].event[j];
+		needle[n++] = ':'; needle[n] = 0;
+		hit_probes[i].count += (u32)count_sub(trace, total, needle, n);
+	}
+	return 0;
+}
+
 static int probe_hits(void)
 {
-	char root[128], path[256], needle[64];
-	static char trace[65536];
-	u64 n, i;
+	char root[128], path[256];
+	u64 i, round;
 	int rc = -1;
 
 	if (probe_root(root, sizeof(root))) {
@@ -1206,53 +1240,47 @@ static int probe_hits(void)
 			goto out;
 		}
 
+	for (round = 0; round < PROBE_ROUNDS; round++) {
+		probe_path(path, sizeof(path), root, "trace");
+		(void)clear_path(path);
+		probe_path(path, sizeof(path), root, "tracing_on");
+		(void)write_path(path, "1\n");
+		probe_trigger_cheap();
+		(void)write_path(path, "0\n");
+		if (count_trace(root))
+			goto out;
+	}
+
+	/* Namespace/mount triggers are destructive to a private mount namespace
+	 * only, so run them once after the repeated cheap triggers. */
+	probe_path(path, sizeof(path), root, "trace");
+	(void)clear_path(path);
 	probe_path(path, sizeof(path), root, "tracing_on");
 	(void)write_path(path, "1\n");
-	probe_trigger();
+	probe_trigger_ns();
 	(void)write_path(path, "0\n");
+	if (count_trace(root))
+		goto out;
 
-	probe_path(path, sizeof(path), root, "trace");
-	{
-		sysarg fd = xopen(path, O_RDONLY);
-		u64 total = 0;
-
-		if (fd < 0)
-			goto out;
-		while (total < sizeof(trace)) {
-			sysarg r = sys6(SYS_read, fd, (sysarg)(trace + total),
-					(sysarg)(sizeof(trace) - total), 0, 0, 0);
-			if (r <= 0)
-				break;
-			total += (u64)r;
-		}
-		sys6(SYS_close, fd, 0, 0, 0, 0, 0);
-
-		for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++) {
-			n = 0;
-			for (u64 j = 0; hit_probes[i].event[j]; j++)
-				needle[n++] = hit_probes[i].event[j];
-			needle[n++] = ':'; needle[n] = 0;
-			hit_probes[i].count = (u32)count_sub(trace, total, needle, n);
-			o_put(P "probe ");
-			o_put(hit_probes[i].symbol);
-			o_put("=");
-			o_dec(hit_probes[i].count);
-			o_put("\n");
-		}
-		probe_bits = 0;
-		for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]) && i < 32; i++)
-			if (hit_probes[i].count)
-				probe_bits |= (u32)1 << i;
-		o_flush();
-		rc = 0;
+	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++) {
+		o_put(P "probe ");
+		o_put(hit_probes[i].symbol);
+		o_put("=");
+		o_dec(hit_probes[i].count);
+		o_put("\n");
 	}
+	probe_bits = 0;
+	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]) && i < 32; i++)
+		if (hit_probes[i].count)
+			probe_bits |= (u32)1 << i;
+	o_flush();
+	rc = 0;
 
 out:
 	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++)
 		probe_finish(&hit_probes[i], root);
 	return rc;
 }
-
 /* Write probe_bits into the module's .data.susfs_hook_map.  The symbol lookup is
  * the same ELF .symtab the loader already validates; the map is in an allocated
  * PROGBITS section, so its file offset is section->sh_offset + (st_value - sh_addr).
