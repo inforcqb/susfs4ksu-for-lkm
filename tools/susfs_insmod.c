@@ -102,6 +102,10 @@ typedef __INTPTR_TYPE__ sysarg;
 #define SYS_lseek	62
 #define SYS_mmap	222
 #define SYS_init_module	105
+#define SYS_mkdirat	34
+#define SYS_unlinkat	35
+#define SYS_umount2	39
+#define SYS_mount	40
 #define SYS_statfs	43
 #define SYS_readlinkat	78
 #define SYS_unshare	97
@@ -1120,7 +1124,8 @@ static void trigger_map_files(void)
 	trigger_readlink(path);
 }
 
-static void trigger_unshare(void);
+static int trigger_unshare(void);
+static void trigger_mount(void);
 
 static void trigger_open(const char *path)
 {
@@ -1154,13 +1159,27 @@ static void probe_trigger(void)
 	trigger_readlink("/proc/self/fd/0");
 	trigger_readlink("/proc/self/exe");
 	trigger_process_vm();
-	trigger_unshare();
+	if (!trigger_unshare())
+		trigger_mount();
 	trigger_map_files();
 }
 
-static void trigger_unshare(void)
+static int trigger_unshare(void)
 {
-	sys6(SYS_unshare, CLONE_NEWNS, 0, 0, 0, 0, 0);
+	sysarg r = sys6(SYS_unshare, CLONE_NEWNS, 0, 0, 0, 0, 0);
+
+	return r == 0 ? 0 : -1;
+}
+
+static void trigger_mount(void)
+{
+	const char mnt[] = "/data/local/tmp/.susfs_probe_mnt";
+
+	sys6(SYS_mkdirat, AT_FDCWD, (sysarg)mnt, 0700, 0, 0, 0);
+	(void)sys6(SYS_mount, (sysarg)"none", (sysarg)mnt, (sysarg)"tmpfs",
+		   0, (sysarg)"size=4k", 0);
+	(void)sys6(SYS_umount2, (sysarg)mnt, 2, 0, 0, 0, 0);
+	(void)sys6(SYS_unlinkat, AT_FDCWD, (sysarg)mnt, 0, 0, 0, 0);
 }
 
 static int probe_hits(void)
