@@ -934,6 +934,40 @@ jobs:
           path: /tmp/susfs_insmod
           if-no-files-found: error
 
+  # The same loader with the Android NDK instead of the DDK clang.  The DDK toolchain is
+  # for the .ko; a userspace client belongs on the NDK's API-leveled clang/lld and its
+  # llvm-symbolizer.  This job is separate so both artifacts can be compared on device.
+  tools-ndk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: |
+          set -e
+          yes | sdkmanager --install "ndk;26.3.11579264" >/dev/null
+          echo "ANDROID_NDK=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> "$GITHUB_ENV"
+
+      - name: Build module loader with NDK
+        run: |
+          set -e
+          CC="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+          "$CC" -O2 -g -nostdlib -static-pie -fno-stack-protector -fno-builtin                 -fuse-ld=lld -Wl,-e,_start -Wl,-z,max-page-size=16384                 -o /tmp/susfs_insmod_ndk tools/susfs_insmod.c
+          file /tmp/susfs_insmod_ndk
+          ls -la /tmp/susfs_insmod_ndk
+
+      - name: Upload NDK module loader
+        uses: actions/upload-artifact@v6
+        with:
+          name: susfs_insmod-ndk
+          path: /tmp/susfs_insmod_ndk
+          if-no-files-found: error
+
   # The flashable KernelSU module, packed from the artifacts of the run that just finished.
   #
   # It sits after the matrix rather than only in a release-triggered workflow of its own so that
