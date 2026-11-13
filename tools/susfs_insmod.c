@@ -947,6 +947,8 @@ static int probe_prepare(struct hit_probe *p, const char *root)
 	probe_path(path, sizeof(path), root, "kprobe_events");
 	dbg("prep1 ");
 	/* remove a stale event, ignoring failure */
+	dbg("ev="); dbg(p->event); dbg(" ");
+	dbg("sym="); dbg(p->symbol); dbg(" ");
 	n = 0;
 	cmd[n++] = '-'; cmd[n++] = ':';
 	for (i = 0; p->event[i]; i++) cmd[n++] = p->event[i];
