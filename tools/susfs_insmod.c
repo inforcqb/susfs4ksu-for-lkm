@@ -1220,7 +1220,7 @@ static int count_trace(const char *root)
 static int probe_hits(void)
 {
 	char root[128], path[256];
-	u64 i, round;
+	u64 i, round, armed = 0;
 	int rc = -1;
 
 	if (probe_root(root, sizeof(root))) {
@@ -1232,13 +1232,22 @@ static int probe_hits(void)
 	probe_path(path, sizeof(path), root, "trace");
 	(void)clear_path(path);
 
-	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++)
+	/* A slot that cannot be armed is not a probe failure: its bit simply stays 0
+	 * while the other slots are still measured.  Only when nothing at all could be
+	 * armed is the whole map dropped (fallback). */
+	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++) {
 		if (probe_prepare(&hit_probes[i], root)) {
 			o_put(P "probe: cannot install ");
 			o_put(hit_probes[i].symbol);
-			o_put("; fallback stays the default\n");
-			goto out;
+			o_put("; slot stays 0\n");
+			continue;
 		}
+		armed++;
+	}
+	if (!armed) {
+		o_put(P "probe: no slot could be armed; fallback stays the default\n");
+		goto out;
+	}
 
 	for (round = 0; round < PROBE_ROUNDS; round++) {
 		probe_path(path, sizeof(path), root, "trace");
