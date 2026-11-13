@@ -844,6 +844,11 @@ static int xwrite_all(sysarg fd, const char *s, u64 n)
 	return 0;
 }
 
+static void dbg(const char *s)
+{
+	sys6(SYS_write, 2, (sysarg)s, (sysarg)s_len(s), 0, 0, 0);
+}
+
 static int write_path(const char *path, const char *s)
 {
 	sysarg fd = xopen(path, O_WRONLY);
@@ -996,6 +1001,7 @@ static int probe_hits(void)
 	u64 n, i;
 	int rc = -1;
 
+	dbg("probe: start\n");
 	if (probe_root(root, sizeof(root))) {
 		o_put(P "probe: tracefs is not mounted; fallback stays the default\n");
 		return -1;
@@ -1005,6 +1011,7 @@ static int probe_hits(void)
 	probe_path(path, sizeof(path), root, "trace");
 	(void)clear_path(path);
 
+	dbg("probe: prepare\n");
 	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++)
 		if (probe_prepare(&hit_probes[i], root)) {
 			o_put(P "probe: cannot install ");
@@ -1018,6 +1025,7 @@ static int probe_hits(void)
 	probe_trigger();
 	(void)write_path(path, "0\n");
 
+	dbg("probe: read trace\n");
 	probe_path(path, sizeof(path), root, "trace");
 	{
 		sysarg fd = xopen(path, O_RDONLY);
