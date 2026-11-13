@@ -86,6 +86,7 @@ typedef __INTPTR_TYPE__ sysarg;
 #define O_RDONLY	0
 #define O_WRONLY	1
 #define O_NONBLOCK	0x800
+#define O_TRUNC		0x200
 #define SEEK_END	2
 #define PROT_READ	1
 #define PROT_WRITE	2
@@ -800,12 +801,270 @@ static int modinfo_lookup(char *base, u64 size, const char *key, char **val, u64
 }
 
 /* -------------------------------------------------------------------------- *
+ * optional pre-load hit probe                                                *
+ * -------------------------------------------------------------------------- *
+ * The loader is a user-space program, so it can drive tracefs before the
+ * module exists.  This is the C equivalent of tools/probe_hits.py: it installs
+ * kprobes on unique kernel symbols, runs a few opens, and reports how many
+ * times each out-of-line entry executed.  It deliberately does not patch the
+ * module yet; -p is the bring-up mode for the bitmap design.
+ */
+
+struct hit_probe {
+	const char *symbol;
+	const char *event;
+	u32 count;
+};
+
+static struct hit_probe hit_probes[] = {
+	{ "vfs_open",       "sp_vfs",    0 },
+	{ "path_openat",    "sp_path",   0 },
+	{ "do_dentry_open", "sp_dentry", 0 },
+};
+
+#define TRACE_ROOT "/sys/kernel/tracing/"
+#define TRACE_ALT  "/sys/kernel/debug/tracing/"
+
+static sysarg xopen(const char *path, int flags)
+{
+	return sys6(SYS_openat, AT_FDCWD, (sysarg)path, flags, 0, 0, 0);
+}
+
+static int xwrite_all(sysarg fd, const char *s, u64 n)
+{
+	u64 off = 0;
+
+	while (off < n) {
+		sysarg r = sys6(SYS_write, fd, (sysarg)(s + off), (sysarg)(n - off), 0, 0, 0);
+
+		if (r <= 0)
+			return -1;
+		off += (u64)r;
+	}
+	return 0;
+}
+
+static int write_path(const char *path, const char *s)
+{
+	sysarg fd = xopen(path, O_WRONLY);
+	int ret;
+
+	if (fd < 0)
+		return -1;
+	ret = xwrite_all(fd, s, s_len(s));
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+	return ret;
+}
+
+static int clear_path(const char *path)
+{
+	sysarg fd = xopen(path, O_WRONLY | O_TRUNC);
+
+	if (fd < 0)
+		return -1;
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+	return 0;
+}
+
+static u64 count_sub(const char *hay, u64 hlen, const char *needle, u64 nlen)
+{
+	u64 i, n = 0;
+
+	for (i = 0; i + nlen <= hlen; i++)
+		if (s_eq_n(hay + i, needle, nlen))
+			n++;
+	return n;
+}
+
+static int probe_root(char *root, u64 cap)
+{
+	const char *p = TRACE_ROOT;
+	u64 n = s_len(p);
+
+	if (n + 1 > cap)
+		return -1;
+	copy_n(root, p, n + 1);
+	{
+		sysarg fd = xopen(TRACE_ROOT "kprobe_events", O_RDONLY);
+
+		if (fd >= 0) {
+			sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+			return 0;
+		}
+	}
+	n = s_len(TRACE_ALT);
+	if (n + 1 > cap)
+		return -1;
+	copy_n(root, TRACE_ALT, n + 1);
+	{
+		sysarg fd = xopen(TRACE_ALT "kprobe_events", O_RDONLY);
+
+		if (fd >= 0) {
+			sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+			return 0;
+		}
+	}
+	return -1;
+}
+
+static void probe_path(char *dst, u64 cap, const char *root, const char *tail)
+{
+	u64 n = 0, i;
+
+	for (i = 0; root[i] && n + 1 < cap; i++)
+		dst[n++] = root[i];
+	for (i = 0; tail[i] && n + 1 < cap; i++)
+		dst[n++] = tail[i];
+	dst[n] = 0;
+}
+
+static void event_path(char *dst, u64 cap, const char *root, const char *event,
+		       const char *tail)
+{
+	u64 n = 0, i;
+
+	for (i = 0; root[i] && n + 1 < cap; i++) dst[n++] = root[i];
+	for (i = 0; "events/kprobes/"[i] && n + 1 < cap; i++)
+		dst[n++] = "events/kprobes/"[i];
+	for (i = 0; event[i] && n + 1 < cap; i++) dst[n++] = event[i];
+	for (i = 0; tail[i] && n + 1 < cap; i++) dst[n++] = tail[i];
+	dst[n] = 0;
+}
+
+static int probe_prepare(struct hit_probe *p, const char *root)
+{
+	char path[256], cmd[128];
+	u64 n = 0, i;
+
+	probe_path(path, sizeof(path), root, "kprobe_events");
+	/* remove a stale event, ignoring failure */
+	n = 0;
+	cmd[n++] = '-'; cmd[n++] = ':';
+	for (i = 0; p->event[i]; i++) cmd[n++] = p->event[i];
+	cmd[n++] = '\n'; cmd[n] = 0;
+	(void)write_path(path, cmd);
+
+	n = 0;
+	cmd[n++] = 'p'; cmd[n++] = ':';
+	for (i = 0; p->event[i]; i++) cmd[n++] = p->event[i];
+	cmd[n++] = ' ';
+	for (i = 0; p->symbol[i]; i++) cmd[n++] = p->symbol[i];
+	cmd[n++] = '\n'; cmd[n] = 0;
+	if (write_path(path, cmd))
+		return -1;
+
+	event_path(path, sizeof(path), root, p->event, "/enable");
+	return write_path(path, "1\n");
+}
+
+static void probe_finish(struct hit_probe *p, const char *root)
+{
+	char path[256], cmd[128];
+	u64 n = 0, i;
+
+	event_path(path, sizeof(path), root, p->event, "/enable");
+	(void)write_path(path, "0\n");
+
+	probe_path(path, sizeof(path), root, "kprobe_events");
+	n = 0;
+	cmd[n++] = '-'; cmd[n++] = ':';
+	for (i = 0; p->event[i]; i++) cmd[n++] = p->event[i];
+	cmd[n++] = '\n'; cmd[n] = 0;
+	(void)write_path(path, cmd);
+}
+
+static void probe_trigger(void)
+{
+	static const char *paths[] = {
+		"/system/build.prop",
+		"/proc/version",
+		"/system",
+	};
+	u64 i;
+
+	for (i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+		sysarg fd = xopen(paths[i], O_RDONLY);
+
+		if (fd >= 0)
+			sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+	}
+}
+
+static int probe_hits(void)
+{
+	char root[128], path[256], trace[8192], needle[64];
+	u64 n, i;
+	int rc = -1;
+
+	if (probe_root(root, sizeof(root))) {
+		o_put(P "probe: tracefs is not mounted; fallback stays the default\n");
+		return -1;
+	}
+	probe_path(path, sizeof(path), root, "tracing_on");
+	(void)write_path(path, "0\n");
+	probe_path(path, sizeof(path), root, "trace");
+	(void)clear_path(path);
+
+	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++)
+		if (probe_prepare(&hit_probes[i], root)) {
+			o_put(P "probe: cannot install ");
+			o_put(hit_probes[i].symbol);
+			o_put("; fallback stays the default\n");
+			goto out;
+		}
+
+	probe_path(path, sizeof(path), root, "tracing_on");
+	(void)write_path(path, "1\n");
+	probe_trigger();
+	(void)write_path(path, "0\n");
+
+	probe_path(path, sizeof(path), root, "trace");
+	{
+		sysarg fd = xopen(path, O_RDONLY);
+		u64 total = 0;
+
+		if (fd < 0)
+			goto out;
+		while (total < sizeof(trace)) {
+			sysarg r = sys6(SYS_read, fd, (sysarg)(trace + total),
+					(sysarg)(sizeof(trace) - total), 0, 0, 0);
+			if (r <= 0)
+				break;
+			total += (u64)r;
+		}
+		sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+
+		for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++) {
+			n = 0;
+			needle[n++] = ':';
+			for (u64 j = 0; hit_probes[i].event[j]; j++)
+				needle[n++] = hit_probes[i].event[j];
+			needle[n++] = ':'; needle[n] = 0;
+			hit_probes[i].count = (u32)count_sub(trace, total, needle, n);
+			o_put(P "probe ");
+			o_put(hit_probes[i].symbol);
+			o_put("=");
+			o_dec(hit_probes[i].count);
+			o_put("\n");
+		}
+		o_flush();
+		rc = 0;
+	}
+
+out:
+	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++)
+		probe_finish(&hit_probes[i], root);
+	return rc;
+}
+
+/* -------------------------------------------------------------------------- *
  * main                                                                        *
  * -------------------------------------------------------------------------- */
 
 static void usage(void)
 {
 	o_put(P "usage: susfs_insmod [-v] <module.ko> [module-params ...]\n");
+	o_put(P "       susfs_insmod -p\n");
 	o_flush();
 	finish(2);
 }
@@ -836,6 +1095,11 @@ void insmod_main(long argc, char **argv)
 
 	/* ---- argv ---- */
 	u = 1;
+	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'p' && argv[u][2] == 0) {
+		if (probe_hits())
+			finish(1);
+		finish(0);
+	}
 	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'v' && argv[u][2] == 0) {
 		verbose = 1;
 		u++;
