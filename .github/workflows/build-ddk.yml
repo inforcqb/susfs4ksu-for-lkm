@@ -944,14 +944,15 @@ jobs:
       - name: Checkout module
         uses: actions/checkout@v4
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Set up Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26b
+          add-to-path: true
 
-      - name: Install NDK
-        run: |
-          set -e
-          yes | sdkmanager --install "ndk;26.3.11579264" >/dev/null
-          echo "ANDROID_NDK=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> "$GITHUB_ENV"
+      - name: Export NDK path
+        run: echo "ANDROID_NDK=${{ steps.setup-ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
 
       - name: Build module loader with NDK
         run: |
