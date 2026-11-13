@@ -1061,7 +1061,6 @@ static int probe_hits(void)
 
 		for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++) {
 			n = 0;
-			needle[n++] = ':';
 			for (u64 j = 0; hit_probes[i].event[j]; j++)
 				needle[n++] = hit_probes[i].event[j];
 			needle[n++] = ':'; needle[n] = 0;
