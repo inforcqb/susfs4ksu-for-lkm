@@ -102,6 +102,14 @@ typedef __INTPTR_TYPE__ sysarg;
 #define SYS_lseek	62
 #define SYS_mmap	222
 #define SYS_init_module	105
+#define SYS_statfs	43
+#define SYS_readlinkat	78
+#define SYS_unshare	97
+#define SYS_uname	160
+#define SYS_getpid	172
+#define SYS_process_vm_readv	270
+#define SYS_statx	291
+#define CLONE_NEWNS	0x00020000
 
 #define AT_FDCWD	(-100)
 #define O_RDONLY	0
@@ -1001,26 +1009,164 @@ static void probe_finish(struct hit_probe *p, const char *root)
 	(void)write_path(path, cmd);
 }
 
+static char trigger_buf[8192];
+static char map_buf[4096];
+
+static void trigger_read_into(const char *path, char *buf, u64 cap)
+{
+	sysarg fd = xopen(path, O_RDONLY);
+	u64 off = 0;
+
+	if (fd < 0)
+		return;
+	while (off < cap) {
+		sysarg r = sys6(SYS_read, fd, (sysarg)(buf + off),
+				(sysarg)(cap - off), 0, 0, 0);
+		if (r <= 0)
+			break;
+		off += (u64)r;
+	}
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+}
+
+static void trigger_read(const char *path)
+{
+	trigger_read_into(path, trigger_buf, sizeof(trigger_buf));
+}
+
+static void trigger_write(const char *path, const char *s)
+{
+	sysarg fd = xopen(path, O_WRONLY);
+
+	if (fd < 0)
+		return;
+	(void)xwrite_all(fd, s, s_len(s));
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+}
+
+static void trigger_readlink(const char *path)
+{
+	char buf[256];
+
+	sys6(SYS_readlinkat, AT_FDCWD, (sysarg)path, (sysarg)buf,
+	     (sysarg)(sizeof(buf) - 1), 0, 0);
+}
+
+static void trigger_uname(void)
+{
+	char uts[390];	/* struct new_utsname: 6 * 65, rounded */
+
+	sys6(SYS_uname, (sysarg)uts, 0, 0, 0, 0, 0);
+}
+
+static void trigger_statx(void)
+{
+	char stx[256];	/* struct statx */
+
+	sys6(SYS_statx, AT_FDCWD, (sysarg)"/system", 0, 0x7ff,
+	     (sysarg)stx, 0);
+}
+
+static void trigger_statfs(void)
+{
+	char st[128];	/* struct statfs */
+
+	sys6(SYS_statfs, (sysarg)"/system", (sysarg)st, 0, 0, 0, 0);
+}
+
+static void trigger_process_vm(void)
+{
+	struct trigger_iov {
+		void *base;
+		u64 len;
+	} local, remote;
+	char page[16];
+	sysarg pid = sys6(SYS_getpid, 0, 0, 0, 0, 0, 0);
+
+	local.base = page;
+	local.len = sizeof(page);
+	remote.base = page;
+	remote.len = sizeof(page);
+	sys6(SYS_process_vm_readv, pid, (sysarg)&local, 1,
+	     (sysarg)&remote, 1, 0);
+}
+
+static void trigger_map_files(void)
+{
+	char path[128];
+	u64 n = 0, i;
+	const char prefix[] = "/proc/self/map_files/";
+
+	trigger_read_into("/proc/self/maps", map_buf, sizeof(map_buf));
+	if (!map_buf[0])
+		return;
+	while (n + 1 < sizeof(path) && prefix[n])
+		path[n] = prefix[n], n++;
+	for (i = 0; map_buf[i] && map_buf[i] != '-' &&
+		    map_buf[i] != ' ' && map_buf[i] != '\n'; i++) {
+		if (n + 1 < sizeof(path))
+			path[n++] = map_buf[i];
+	}
+	if (!i || n + 1 >= sizeof(path) || map_buf[i] != '-')
+		return;
+	path[n++] = '-';
+	i++;
+	for (; map_buf[i] && map_buf[i] != '-' && map_buf[i] != ' ' &&
+	       map_buf[i] != '\n'; i++) {
+		if (n + 1 < sizeof(path))
+			path[n++] = map_buf[i];
+	}
+	path[n] = 0;
+	trigger_readlink(path);
+}
+
+static void trigger_unshare(void);
+
+static void trigger_open(const char *path)
+{
+	sysarg fd = xopen(path, O_RDONLY);
+
+	if (fd >= 0)
+		sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+}
+
 static void probe_trigger(void)
 {
-	static const char *paths[] = {
-		"/system/build.prop",
-		"/proc/version",
-		"/system",
-	};
-	u64 i;
+	/* open family: vfs_open, path_openat, d_path */
+	trigger_open("/system/build.prop");
+	trigger_open("/proc/version");
+	trigger_open("/system");
 
-	for (i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
-		sysarg fd = xopen(paths[i], O_RDONLY);
+	/* seq/proc family: show_map_vma, show_smap, show_map, show_vfs* */
+	trigger_read("/proc/self/maps");
+	trigger_read("/proc/self/smaps");
+	trigger_read("/proc/self/numa_maps");
+	trigger_read("/proc/self/mountinfo");
+	trigger_read("/proc/self/mounts");
+	trigger_read("/proc/self/mountstats");
+	trigger_read("/proc/self/pagemap");
+	trigger_write("/proc/self/clear_refs", "1\n");
 
-		if (fd >= 0)
-			sys6(SYS_close, fd, 0, 0, 0, 0, 0);
-	}
+	/* syscall family: uname, statx, statfs, readlink, gup */
+	trigger_uname();
+	trigger_statx();
+	trigger_statfs();
+	trigger_readlink("/proc/self/fd/0");
+	trigger_readlink("/proc/self/exe");
+	trigger_process_vm();
+	trigger_unshare();
+	trigger_map_files();
+}
+
+static void trigger_unshare(void)
+{
+	sys6(SYS_unshare, CLONE_NEWNS, 0, 0, 0, 0, 0);
 }
 
 static int probe_hits(void)
 {
-	char root[128], path[256], trace[8192], needle[64];
+	char root[128], path[256], needle[64];
+	static char trace[65536];
 	u64 n, i;
 	int rc = -1;
 
