@@ -371,6 +371,16 @@
       "layer": "legacy",
       "phase": 0,
       "budget": 999
+    },
+    "kernel/susfs_hook_map.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
+    },
+    "kernel/susfs_hook_slots.h": {
+      "layer": "legacy",
+      "phase": 0,
+      "budget": 999
     }
   }
 }
