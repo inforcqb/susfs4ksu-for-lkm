@@ -856,7 +856,9 @@ static int write_path(const char *path, const char *s)
 
 	if (fd < 0)
 		return -1;
+	dbg("w1 ");
 	ret = xwrite_all(fd, s, s_len(s));
+	dbg("w2 ");
 	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
 	return ret;
 }
@@ -949,6 +951,8 @@ static int probe_prepare(struct hit_probe *p, const char *root)
 	cmd[n++] = '-'; cmd[n++] = ':';
 	for (i = 0; p->event[i]; i++) cmd[n++] = p->event[i];
 	cmd[n++] = '\n'; cmd[n] = 0;
+	dbg("cmd ");
+	dbg(cmd);
 	(void)write_path(path, cmd);
 	dbg("prep2 ");
 
@@ -981,6 +985,8 @@ static void probe_finish(struct hit_probe *p, const char *root)
 	cmd[n++] = '-'; cmd[n++] = ':';
 	for (i = 0; p->event[i]; i++) cmd[n++] = p->event[i];
 	cmd[n++] = '\n'; cmd[n] = 0;
+	dbg("cmd ");
+	dbg(cmd);
 	(void)write_path(path, cmd);
 }
 
