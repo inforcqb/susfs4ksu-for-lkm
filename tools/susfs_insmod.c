@@ -847,10 +847,6 @@ static int xwrite_all(sysarg fd, const char *s, u64 n)
 	return 0;
 }
 
-static void dbg(const char *s)
-{
-	sys6(SYS_write, 2, (sysarg)s, (sysarg)s_len(s), 0, 0, 0);
-}
 
 static int write_path(const char *path, const char *s)
 {
@@ -859,9 +855,7 @@ static int write_path(const char *path, const char *s)
 
 	if (fd < 0)
 		return -1;
-	dbg("w1 ");
 	ret = xwrite_all(fd, s, s_len(s));
-	dbg("w2 ");
 	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
 	return ret;
 }
@@ -946,20 +940,13 @@ static int probe_prepare(struct hit_probe *p, const char *root)
 	char path[256], cmd[128];
 	u64 n = 0, i;
 
-	dbg("prep0 ");
 	probe_path(path, sizeof(path), root, "kprobe_events");
-	dbg("prep1 ");
 	/* remove a stale event, ignoring failure */
-	dbg("ev="); dbg(p->event); dbg(" ");
-	dbg("sym="); dbg(p->symbol); dbg(" ");
 	n = 0;
 	cmd[n++] = '-'; cmd[n++] = ':';
 	for (i = 0; p->event[i]; i++) cmd[n++] = p->event[i];
 	cmd[n++] = '\n'; cmd[n] = 0;
-	dbg("cmd ");
-	dbg(cmd);
 	(void)write_path(path, cmd);
-	dbg("prep2 ");
 
 	n = 0;
 	cmd[n++] = 'p'; cmd[n++] = ':';
@@ -969,10 +956,8 @@ static int probe_prepare(struct hit_probe *p, const char *root)
 	cmd[n++] = '\n'; cmd[n] = 0;
 	if (write_path(path, cmd))
 		return -1;
-	dbg("prep3 ");
 
 	event_path(path, sizeof(path), root, p->event, "/enable");
-	dbg("prep4 ");
 	return write_path(path, "1\n");
 }
 
@@ -982,7 +967,6 @@ static void probe_finish(struct hit_probe *p, const char *root)
 	u64 n = 0, i;
 
 	event_path(path, sizeof(path), root, p->event, "/enable");
-	dbg("prep4 ");
 	(void)write_path(path, "0\n");
 
 	probe_path(path, sizeof(path), root, "kprobe_events");
@@ -990,8 +974,6 @@ static void probe_finish(struct hit_probe *p, const char *root)
 	cmd[n++] = '-'; cmd[n++] = ':';
 	for (i = 0; p->event[i]; i++) cmd[n++] = p->event[i];
 	cmd[n++] = '\n'; cmd[n] = 0;
-	dbg("cmd ");
-	dbg(cmd);
 	(void)write_path(path, cmd);
 }
 
@@ -1018,7 +1000,6 @@ static int probe_hits(void)
 	u64 n, i;
 	int rc = -1;
 
-	dbg("probe: start\n");
 	if (probe_root(root, sizeof(root))) {
 		o_put(P "probe: tracefs is not mounted; fallback stays the default\n");
 		return -1;
@@ -1028,7 +1009,6 @@ static int probe_hits(void)
 	probe_path(path, sizeof(path), root, "trace");
 	(void)clear_path(path);
 
-	dbg("probe: prepare\n");
 	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++)
 		if (probe_prepare(&hit_probes[i], root)) {
 			o_put(P "probe: cannot install ");
@@ -1042,7 +1022,6 @@ static int probe_hits(void)
 	probe_trigger();
 	(void)write_path(path, "0\n");
 
-	dbg("probe: read trace\n");
 	probe_path(path, sizeof(path), root, "trace");
 	{
 		sysarg fd = xopen(path, O_RDONLY);
