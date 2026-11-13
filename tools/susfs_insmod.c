@@ -941,13 +941,16 @@ static int probe_prepare(struct hit_probe *p, const char *root)
 	char path[256], cmd[128];
 	u64 n = 0, i;
 
+	dbg("prep0 ");
 	probe_path(path, sizeof(path), root, "kprobe_events");
+	dbg("prep1 ");
 	/* remove a stale event, ignoring failure */
 	n = 0;
 	cmd[n++] = '-'; cmd[n++] = ':';
 	for (i = 0; p->event[i]; i++) cmd[n++] = p->event[i];
 	cmd[n++] = '\n'; cmd[n] = 0;
 	(void)write_path(path, cmd);
+	dbg("prep2 ");
 
 	n = 0;
 	cmd[n++] = 'p'; cmd[n++] = ':';
@@ -957,8 +960,10 @@ static int probe_prepare(struct hit_probe *p, const char *root)
 	cmd[n++] = '\n'; cmd[n] = 0;
 	if (write_path(path, cmd))
 		return -1;
+	dbg("prep3 ");
 
 	event_path(path, sizeof(path), root, p->event, "/enable");
+	dbg("prep4 ");
 	return write_path(path, "1\n");
 }
 
@@ -968,6 +973,7 @@ static void probe_finish(struct hit_probe *p, const char *root)
 	u64 n = 0, i;
 
 	event_path(path, sizeof(path), root, p->event, "/enable");
+	dbg("prep4 ");
 	(void)write_path(path, "0\n");
 
 	probe_path(path, sizeof(path), root, "kprobe_events");
