@@ -114,7 +114,9 @@ dmesg_start() {
 }
 if [ -n "$TIMEOUT_BIN" ]; then
   dmesg_start
-  "$TIMEOUT_BIN" "$LOAD_TIMEOUT" "$MODDIR/bin/susfs_insmod" "$KO" expose_proc=1
+  # -p: run the pre-load hit probe and patch the module's hook map from its result before
+  # loading (probe failure falls back to the default map and the load continues).
+  "$TIMEOUT_BIN" "$LOAD_TIMEOUT" "$MODDIR/bin/susfs_insmod" -p "$KO" expose_proc=1
   rc=$?
 else
   echo "load failed: no timeout utility for the ${LOAD_TIMEOUT}s module_init limit"
