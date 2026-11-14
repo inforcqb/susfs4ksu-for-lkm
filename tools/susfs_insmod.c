@@ -104,9 +104,19 @@ typedef __INTPTR_TYPE__ sysarg;
 #define SYS_init_module	105
 #define SYS_mkdirat	34
 #define SYS_unlinkat	35
+#define SYS_symlinkat	36
+#define SYS_linkat	37
+#define SYS_renameat	38
 #define SYS_umount2	39
 #define SYS_mount	40
 #define SYS_statfs	43
+#define SYS_faccessat	48
+#define SYS_fchmodat	53
+#define SYS_newfstatat	79
+#define SYS_setxattr	5
+#define SYS_getxattr	8
+#define SYS_listxattr	11
+#define SYS_removexattr	14
 #define SYS_readlinkat	78
 #define SYS_unshare	97
 #define SYS_uname	160
@@ -116,8 +126,10 @@ typedef __INTPTR_TYPE__ sysarg;
 #define CLONE_NEWNS	0x00020000
 
 #define AT_FDCWD	(-100)
+#define AT_REMOVEDIR	0x200
 #define O_RDONLY	0
 #define O_WRONLY	1
+#define O_CREAT		0x40
 #define O_NONBLOCK	0x800
 #define O_TRUNC		0x200
 #define SEEK_END	2
@@ -859,7 +871,7 @@ static struct hit_probe hit_probes[] = {
 };
 #undef PROBE_ROW
 
-static u32 probe_bits;
+static u32 probe_bits[SUSFS_HOOK_WORDS];
 #define PROBE_ROUNDS 1000
 
 #define TRACE_ROOT "/sys/kernel/tracing/"
@@ -1136,6 +1148,85 @@ static void trigger_open(const char *path)
 		sys6(SYS_close, fd, 0, 0, 0, 0, 0);
 }
 
+/* sus_path VFS slots: stat -> vfs_getattr, faccessat -> inode_permission, the
+ * xattr family -> vfs_*xattr, chmod -> notify_change, link/rename/unlink/rmdir
+ * -> their vfs_* entry, readlink -> vfs_readlink.  Everything is rooted under
+ * /data/local/tmp; an operation the filesystem or SELinux refuses still passes
+ * the VFS entry the probe counts. */
+#define PROBE_VFS_DIR	"/data/local/tmp/.susfs_probe_dir"
+#define PROBE_VFS_FILE	"/data/local/tmp/.susfs_probe_dir/f"
+#define PROBE_VFS_FILE2	"/data/local/tmp/.susfs_probe_dir/f2"
+#define PROBE_VFS_LINK	"/data/local/tmp/.susfs_probe_dir/l"
+
+static void trigger_stat_path(const char *path)
+{
+	char st[256];	/* struct stat, 128 bytes on arm64 */
+
+	sys6(SYS_newfstatat, AT_FDCWD, (sysarg)path, (sysarg)st, 0, 0, 0);
+}
+
+static void trigger_access_path(const char *path)
+{
+	sys6(SYS_faccessat, AT_FDCWD, (sysarg)path, 4 /* R_OK */, 0, 0, 0);
+}
+
+static void trigger_mkdir_path(const char *path)
+{
+	sys6(SYS_mkdirat, AT_FDCWD, (sysarg)path, 0700, 0, 0, 0);
+}
+
+static void trigger_unlink_path(const char *path, int flags)
+{
+	sys6(SYS_unlinkat, AT_FDCWD, (sysarg)path, flags, 0, 0, 0);
+}
+
+static void trigger_xattr_suite(const char *path)
+{
+	static const char name[] = "user.susfs_probe";
+	char val[4] = "v";
+	char out[64];
+
+	sys6(SYS_setxattr, (sysarg)path, (sysarg)name, (sysarg)val, 1, 0, 0);
+	sys6(SYS_getxattr, (sysarg)path, (sysarg)name, (sysarg)out,
+	     (sysarg)sizeof(out), 0, 0);
+	sys6(SYS_listxattr, (sysarg)path, (sysarg)out, (sysarg)sizeof(out), 0, 0, 0);
+	sys6(SYS_removexattr, (sysarg)path, (sysarg)name, 0, 0, 0, 0);
+}
+
+/* One pass: creates the tree, exercises every write-side entry, then removes it
+ * again.  Called once, outside the repeated cheap loop. */
+static void probe_trigger_vfs_once(void)
+{
+	sysarg fd;
+
+	trigger_mkdir_path(PROBE_VFS_DIR);
+	fd = sys6(SYS_openat, AT_FDCWD, (sysarg)PROBE_VFS_FILE,
+		  O_WRONLY | O_CREAT | O_TRUNC, 0600, 0, 0);
+	if (fd >= 0)
+		sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+
+	trigger_stat_path(PROBE_VFS_FILE);
+	trigger_access_path(PROBE_VFS_FILE);
+	trigger_xattr_suite(PROBE_VFS_FILE);
+
+	/* notify_change: chmod on the temp file, never on a system path. */
+	sys6(SYS_fchmodat, AT_FDCWD, (sysarg)PROBE_VFS_FILE, 0600, 0, 0, 0);
+
+	sys6(SYS_symlinkat, (sysarg)PROBE_VFS_FILE, AT_FDCWD,
+	     (sysarg)PROBE_VFS_LINK, 0, 0, 0);
+	trigger_readlink(PROBE_VFS_LINK);
+	trigger_unlink_path(PROBE_VFS_LINK, 0);
+
+	sys6(SYS_linkat, AT_FDCWD, (sysarg)PROBE_VFS_FILE, AT_FDCWD,
+	     (sysarg)PROBE_VFS_FILE2, 0, 0);
+	sys6(SYS_renameat, AT_FDCWD, (sysarg)PROBE_VFS_FILE2, AT_FDCWD,
+	     (sysarg)PROBE_VFS_LINK, 0, 0);
+	trigger_unlink_path(PROBE_VFS_LINK, 0);
+
+	trigger_unlink_path(PROBE_VFS_FILE, 0);
+	trigger_unlink_path(PROBE_VFS_DIR, AT_REMOVEDIR);
+}
+
 static void probe_trigger_cheap(void)
 {
 	/* open family: vfs_open, path_openat, d_path */
@@ -1161,6 +1252,10 @@ static void probe_trigger_cheap(void)
 	trigger_readlink("/proc/self/exe");
 	trigger_process_vm();
 	trigger_map_files();
+
+	/* sus_path VFS: vfs_getattr, inode_permission */
+	trigger_stat_path("/system/build.prop");
+	trigger_access_path("/system/build.prop");
 }
 
 static int trigger_unshare(void)
@@ -1183,6 +1278,7 @@ static void trigger_mount(void)
 
 static void probe_trigger_ns(void)
 {
+	probe_trigger_vfs_once();
 	if (!trigger_unshare())
 		trigger_mount();
 }
@@ -1278,10 +1374,16 @@ static int probe_hits(void)
 		o_dec(hit_probes[i].count);
 		o_put("\n");
 	}
-	probe_bits = 0;
-	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]) && i < 32; i++)
-		if (hit_probes[i].count)
-			probe_bits |= (u32)1 << i;
+	probe_bits[0] = 0;
+	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++) {
+		u64 word = i / 32, bit = i % 32;
+
+		if (!hit_probes[i].count)
+			continue;
+		if (word >= SUSFS_HOOK_WORDS)
+			break;
+		probe_bits[word] |= (u32)1 << bit;
+	}
 	o_flush();
 	rc = 0;
 
@@ -1329,12 +1431,15 @@ static int patch_hook_map(char *img, u64 size, struct elf64_shdr *shdrs,
 		map->abi = SUSFS_HOOK_MAP_ABI;
 		map->nbits = SUSFS_HOOK_SLOT_COUNT;
 		for (j = 0; j < SUSFS_HOOK_WORDS; j++)
-			map->bits[j] = 0;
-		map->bits[0] = probe_bits;
+			map->bits[j] = probe_bits[j];
 		__sync_synchronize();
 		map->ready = SUSFS_HOOK_MAP_READY;
 		o_put(P "hook map patched: ");
-		o_hex(probe_bits);
+		for (j = SUSFS_HOOK_WORDS; j > 0; j--) {
+			if (j != SUSFS_HOOK_WORDS)
+				o_put(" ");
+			o_hex(probe_bits[j - 1]);
+		}
 		o_put(" -> ");
 		o_put(name);
 		o_put("\n");
