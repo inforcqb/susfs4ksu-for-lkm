@@ -1194,8 +1194,9 @@ static void trigger_xattr_suite(const char *path)
 }
 
 /* One pass: creates the tree, exercises every write-side entry, then removes it
- * again.  Called once, outside the repeated cheap loop. */
-static void probe_trigger_vfs_once(void)
+ * again.  Part of the repeated cheap loop, so every VFS slot gets the same
+ * 1000-round floor as the read-side triggers. */
+static void probe_trigger_vfs(void)
 {
 	sysarg fd;
 
@@ -1256,6 +1257,7 @@ static void probe_trigger_cheap(void)
 	/* sus_path VFS: vfs_getattr, inode_permission */
 	trigger_stat_path("/system/build.prop");
 	trigger_access_path("/system/build.prop");
+	probe_trigger_vfs();
 }
 
 static int trigger_unshare(void)
@@ -1278,7 +1280,6 @@ static void trigger_mount(void)
 
 static void probe_trigger_ns(void)
 {
-	probe_trigger_vfs_once();
 	if (!trigger_unshare())
 		trigger_mount();
 }
