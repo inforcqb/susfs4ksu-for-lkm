@@ -1,5 +1,10 @@
 # AGENTS.md — susfs4ksu-lkm 开发向导
 
+> 本文件绝对路径：`C:\Users\ASUS\dsh\workfile\ci-dl\wunify\AGENTS.md`
+> 仓库根：`C:\Users\ASUS\dsh\workfile\ci-dl\wunify`
+> 记录仓库：`C:\Users\ASUS\dsh\workfile\ci-dl\notes`
+> 测试脚本目录：`C:\Users\ASUS\dsh\workfile\ci-dl\dev`
+
 面向接手的 AI/开发者（Codex 等）。先读完本文件，再动代码。**每个改动必须 CI + 真机验证**，只写“编译通过”不算完成。
 
 ---
@@ -12,14 +17,14 @@ SUSFS 的**可加载内核模块（LKM）版**：不重编译内核，用 `.ko` 
 - 仓库：`wunify`（本目录），远端 `inforcqb/susfs4ksu-lkm`（GitHub 已改名为 `susfs4ksu-for-lkm`，SSH 会提示 moved，属正常）
 - 当前分支：`feat/lookup-inline`（基于 `feat/susfs-hooks`）
 - 设备：OnePlus PJA110，`5.15.180-android13-8`，KernelSU（root 在重启后需要重新授权）
-- 记录仓库：`../notes`（另一 git 仓库，所有实测结论写进 `reports/`）
+- 记录仓库：`C:/Users/ASUS/dsh/workfile/ci-dl/notes`（另一 git 仓库，所有实测结论写进 `reports/`）
 
 ---
 
 ## 1. 五分钟上手
 
 ```sh
-cd wunify
+cd C:/Users/ASUS/dsh/workfile/ci-dl/wunify
 git log --oneline -10                 # 看最近改动
 sed -n 1,120p kernel/susfs_hooks.h    # 中心层 ABI
 sed -n 1,60p  kernel/susfs_hook_slots.h  # map slot（X-macro）
@@ -147,7 +152,7 @@ adb shell 'su -c "rmmod susfs_guard_lkm; echo rmmod=\$?"'
 
 - `-p`：加载前跑 map 探测（1000 轮触发，约 2 分钟）；不带 `-p` 会跳过探测，inline 目标可能因 slot 未置位而不可用。
 - 常规验证：`stat/cat/rm` 隐藏路径 → ENOENT；`/proc/modules | grep -c susfs` → 0；`uname -r`；`rmmod=0`。
-- 完整功能 + 并发压力：`../dev/sufs_full_pressure.sh`（push 到设备后 `su -c sh ...`）。
+- 完整功能 + 并发压力：`C:/Users/ASUS/dsh/workfile/ci-dl/dev/sufs_full_pressure.sh`（push 到设备后 `su -c sh ...`）。
 - 性能：`tools/susfs_bench`（需 CI 构建；`susfs_bench <path> 200000`，`-p 3 1000 120 A B` 配对可分性）。
 
 ---
@@ -156,7 +161,7 @@ adb shell 'su -c "rmmod susfs_guard_lkm; echo rmmod=\$?"'
 
 1. 分支：`feat/<topic>`；一次一个主题。
 2. commit：英文，说明**测得的结果**（不是“修改了 X”），例如 “path_lookupat measured 315 hits; filename_lookup fully inlined (0)”。
-3. 每个改动：CI 绿 → 真机验证 → 在 `../notes/reports/` 写报告（环境、命令、结果）→ notes 仓库提交。
+3. 每个改动：CI 绿 → 真机验证 → 在 `C:/Users/ASUS/dsh/workfile/ci-dl/notes/reports/` 写报告（环境、命令、结果）→ notes 仓库提交。
 4. 不把“编译通过”写成完成；不把 6.x 的推断写成已验证。
 5. 设备上 `rmmod` 前先确认没有并发测试在跑；模块加载失败先看 `dmesg | grep lkmhook`。
 
@@ -190,8 +195,8 @@ adb shell 'su -c "rmmod susfs_guard_lkm; echo rmmod=\$?"'
 ## 9. 相关文档
 
 - `README.md` / `PROC_INTERFACES.md`：用户接口与用法。
-- `../notes/reports/2026-11-14-hook-centre-consolidation.md`：中心层汇聚的完整清单。
-- `../notes/reports/2026-11-14-lookup-ret-hook.md`：lookup ret hook 设计与实测。
-- `../notes/reports/2026-11-14-hook-prototypes.md`：上游 patch 与 6.18 原型核对。
-- `../notes/reports/2026-11-14-hook-overhead.md`：性能/方差/可分性数据。
-- `../notes/reports/2026-11-14-full-pressure.md`：功能 + 并发压力结果。
+- `C:/Users/ASUS/dsh/workfile/ci-dl/notes/reports/2026-11-14-hook-centre-consolidation.md`：中心层汇聚的完整清单。
+- `C:/Users/ASUS/dsh/workfile/ci-dl/notes/reports/2026-11-14-lookup-ret-hook.md`：lookup ret hook 设计与实测。
+- `C:/Users/ASUS/dsh/workfile/ci-dl/notes/reports/2026-11-14-hook-prototypes.md`：上游 patch 与 6.18 原型核对。
+- `C:/Users/ASUS/dsh/workfile/ci-dl/notes/reports/2026-11-14-hook-overhead.md`：性能/方差/可分性数据。
+- `C:/Users/ASUS/dsh/workfile/ci-dl/notes/reports/2026-11-14-full-pressure.md`：功能 + 并发压力结果。
