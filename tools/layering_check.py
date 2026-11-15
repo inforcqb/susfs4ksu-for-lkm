@@ -19,10 +19,14 @@ RULES = {
         "includes": [
             "linux/namei.h", "linux/path.h", "linux/dcache.h",
             "linux/kprobes.h", "susfs_kprobe.h",
+            "susfs_avc_data.h",
         ],
         "symbols": [
             "vfs_mkdir", "filename_parentat", "lookup_one_qstr_excl",
             "done_path_create", "security_path_mkdir",
+            "susfs_avc_registered", "susfs_avc_exiting", "susfs_avc_ctl_lock",
+            "susfs_avc_su_sid", "susfs_avc_priv_app_sid",
+            "susfs_avc_enter_count", "susfs_avc_hit_count",
         ],
     },
     "L": {

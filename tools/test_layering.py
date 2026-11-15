@@ -53,6 +53,13 @@ class LayeringTest(unittest.TestCase):
         text = "#if 0\n#include <linux/namei.h>\n#else\nok\n#endif\n"
         self.assertNotIn("namei", lc.remove_if0(text))
 
+    def test_avc_adapter_cannot_reach_private_state(self) -> None:
+        p = self.write('#include "susfs_avc_data.h"\nsusfs_avc_registered = true;\n')
+        rules = {v["rule"] for v in lc.check_file(p, {"layer": "F"})}
+        self.assertEqual(rules, {"F_INCLUDE", "F_SYMBOL"})
+        p = self.write('#include "susfs_avc_policy.h"\nsusfs_avc_set_enabled(hook, true);\n')
+        self.assertEqual(lc.check_file(p, {"layer": "F"}), [])
+
     def test_umbrella_rejected_in_every_layer_and_wrapper(self) -> None:
         for layer in ("F", "L", "D", "P", "legacy"):
             for include in ('"susfs.h"', '<susfs.h>', '"../kernel/susfs.h"'):

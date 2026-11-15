@@ -258,7 +258,7 @@
     "kernel/susfs_avc_spoof.c": {
       "layer": "F",
       "phase": 6,
-      "budget": 4,
+      "budget": 0,
       "allowed_includes": [],
       "allowed_symbols": []
     },
@@ -501,6 +501,13 @@
       "layer": "legacy",
       "phase": 5,
       "budget": 0
+    },
+    "kernel/susfs_avc_view.h": {
+      "layer": "L",
+      "phase": 6,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
     }
   },
   "header_contract": {
@@ -525,7 +532,10 @@
       "susfs_create_gate.h",
       "susfs_log.h",
       "susfs_opath.h",
-      "susfs_or_entry.h"
+      "susfs_or_entry.h",
+      "susfs_avc_data.h",
+      "susfs_avc_policy.h",
+      "susfs_avc_view.h"
     ]
   }
 }
