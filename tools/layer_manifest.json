@@ -227,10 +227,40 @@
       "phase": 0,
       "budget": 999
     },
+    "kernel/susfs_avc_data.c": {
+      "layer": "D",
+      "phase": 6,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_avc_data.h": {
+      "layer": "D",
+      "phase": 6,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_avc_policy.c": {
+      "layer": "L",
+      "phase": 6,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_avc_policy.h": {
+      "layer": "L",
+      "phase": 6,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
     "kernel/susfs_avc_spoof.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "F",
+      "phase": 6,
+      "budget": 4,
+      "allowed_includes": [],
+      "allowed_symbols": []
     },
     "kernel/susfs_create_data.c": {
       "layer": "D",
