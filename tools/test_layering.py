@@ -53,6 +53,28 @@ class LayeringTest(unittest.TestCase):
         text = "#if 0\n#include <linux/namei.h>\n#else\nok\n#endif\n"
         self.assertNotIn("namei", lc.remove_if0(text))
 
+    def test_umbrella_rejected_in_every_layer_and_wrapper(self) -> None:
+        for layer in ("F", "L", "D", "P", "legacy"):
+            for include in ('"susfs.h"', '<susfs.h>', '"../kernel/susfs.h"'):
+                with self.subTest(layer=layer, include=include):
+                    p = self.write(f"#include {include}\n")
+                    violations = lc.check_file(p, {"layer": layer}, ("susfs.h",))
+                    self.assertEqual([v["rule"] for v in violations], ["HEADER_INCLUDE"])
+
+    def test_explicit_headers_and_commented_umbrella_allowed(self) -> None:
+        p = self.write(
+            '#include "susfs_kstat.h"\n#include "sus_path.h"\n'
+            '/* #include "susfs.h" */\n'
+        )
+        self.assertEqual(lc.check_file(p, {"layer": "legacy"}, ("susfs.h",)), [])
+
+    def test_umbrella_rejected_in_inactive_and_alternate_branches(self) -> None:
+        for text in ('#if 0\n#include "susfs.h"\n#endif\n',
+                     '#ifdef CONFIG_COMPAT\n#else\n#include "susfs.h"\n#endif\n'):
+            p = self.write(text)
+            self.assertEqual([v["rule"] for v in lc.check_file(
+                p, {"layer": "legacy"}, ("susfs.h",))], ["HEADER_INCLUDE"])
+
 
 if __name__ == "__main__":
     unittest.main()

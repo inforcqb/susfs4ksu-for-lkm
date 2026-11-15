@@ -206,6 +206,13 @@ jobs:
             printf '  %-30s %s\n' "$k" "$(cfg "$k")"
           done
 
+      - name: Compile public headers independently
+        run: |
+          set -e
+          if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
+          "$PY" tools/header_smoke.py "$RUNNER_TEMP/header-smoke"
+          make -C "$KDIR" M="$RUNNER_TEMP/header-smoke" ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 modules -j"$(nproc)"
+
       - name: Build susfs_guard_lkm.ko (DDK way)
         run: |
           set -e

@@ -222,11 +222,6 @@
       "allowed_includes": [],
       "allowed_symbols": []
     },
-    "kernel/susfs.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
-    },
     "kernel/susfs_abi.h": {
       "layer": "legacy",
       "phase": 0,
@@ -401,6 +396,106 @@
       "layer": "legacy",
       "phase": 0,
       "budget": 999
+    },
+    "kernel/susfs_helpers.h": {
+      "layer": "legacy",
+      "phase": 5,
+      "budget": 0
+    },
+    "kernel/susfs_core.h": {
+      "layer": "legacy",
+      "phase": 5,
+      "budget": 0
+    },
+    "kernel/sus_path.h": {
+      "layer": "legacy",
+      "phase": 5,
+      "budget": 0
+    },
+    "kernel/susfs_dirent.h": {
+      "layer": "legacy",
+      "phase": 5,
+      "budget": 0
+    },
+    "kernel/susfs_control.h": {
+      "layer": "legacy",
+      "phase": 5,
+      "budget": 0
+    },
+    "kernel/susfs_hide_syms.h": {
+      "layer": "legacy",
+      "phase": 5,
+      "budget": 0
+    },
+    "kernel/sus_mount.h": {
+      "layer": "legacy",
+      "phase": 5,
+      "budget": 0
+    },
+    "kernel/sus_map.h": {
+      "layer": "legacy",
+      "phase": 5,
+      "budget": 0
+    },
+    "kernel/susfs_uname.h": {
+      "layer": "legacy",
+      "phase": 5,
+      "budget": 0
+    },
+    "kernel/susfs_kstat.h": {
+      "layer": "legacy",
+      "phase": 5,
+      "budget": 0
+    },
+    "kernel/spoof_cmdline.h": {
+      "layer": "legacy",
+      "phase": 5,
+      "budget": 0
+    },
+    "kernel/susfs_open_redirect.h": {
+      "layer": "legacy",
+      "phase": 5,
+      "budget": 0
+    },
+    "kernel/susfs_avc_spoof.h": {
+      "layer": "legacy",
+      "phase": 5,
+      "budget": 0
+    },
+    "kernel/susfs_supercall.h": {
+      "layer": "legacy",
+      "phase": 5,
+      "budget": 0
+    },
+    "kernel/susfs_create_gate.h": {
+      "layer": "legacy",
+      "phase": 5,
+      "budget": 0
     }
+  },
+  "header_contract": {
+    "forbidden_includes": [
+      "susfs.h"
+    ],
+    "standalone": [
+      "susfs_helpers.h",
+      "susfs_core.h",
+      "sus_path.h",
+      "susfs_dirent.h",
+      "susfs_control.h",
+      "susfs_hide_syms.h",
+      "sus_mount.h",
+      "sus_map.h",
+      "susfs_uname.h",
+      "susfs_kstat.h",
+      "spoof_cmdline.h",
+      "susfs_open_redirect.h",
+      "susfs_avc_spoof.h",
+      "susfs_supercall.h",
+      "susfs_create_gate.h",
+      "susfs_log.h",
+      "susfs_opath.h",
+      "susfs_or_entry.h"
+    ]
   }
 }
