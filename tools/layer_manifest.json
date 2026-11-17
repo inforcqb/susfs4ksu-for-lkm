@@ -17,9 +17,9 @@
       "budget": 999
     },
     "kernel/btf_layout.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/fsnotify_lifetime.c": {
       "layer": "legacy",
@@ -27,9 +27,9 @@
       "budget": 999
     },
     "kernel/fsnotify_lifetime.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/imports_guard.c": {
       "layer": "legacy",
@@ -62,9 +62,9 @@
       "budget": 999
     },
     "kernel/lsm_hook.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/patch_memory.c": {
       "layer": "legacy",
@@ -72,9 +72,9 @@
       "budget": 999
     },
     "kernel/patch_memory.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/spoof_cmdline.c": {
       "layer": "legacy",
@@ -107,14 +107,14 @@
       "budget": 999
     },
     "kernel/sus_mount_idmap.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "D",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/sus_mount_idmap.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "D",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/sus_mount_ns_iter.c": {
       "layer": "P",
@@ -223,9 +223,9 @@
       "allowed_symbols": []
     },
     "kernel/susfs_abi.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "D",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/susfs_avc_data.c": {
       "layer": "D",
@@ -270,9 +270,9 @@
       "allowed_symbols": []
     },
     "kernel/susfs_create_data.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "D",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/susfs_create_gate.c": {
       "layer": "F",
@@ -289,9 +289,9 @@
       "allowed_symbols": []
     },
     "kernel/susfs_create_policy.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "L",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/susfs_create_vfs.c": {
       "layer": "P",
@@ -301,9 +301,9 @@
       "allowed_symbols": []
     },
     "kernel/susfs_create_vfs.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/susfs_create_view.h": {
       "layer": "D",
@@ -323,9 +323,9 @@
       "budget": 999
     },
     "kernel/susfs_fp_hook.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/susfs_hide_syms.c": {
       "layer": "legacy",
@@ -333,9 +333,9 @@
       "budget": 999
     },
     "kernel/susfs_kprobe.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/susfs_kstat.c": {
       "layer": "legacy",
@@ -393,29 +393,29 @@
       "budget": 999
     },
     "kernel/symbol_resolver.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/susfs_hook_map.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/susfs_hook_slots.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/susfs_hook_engine.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/susfs_hook_engine.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 7,
+      "budget": 0
     },
     "kernel/susfs_hooks.h": {
       "layer": "legacy",
@@ -433,8 +433,8 @@
       "budget": 0
     },
     "kernel/susfs_core.h": {
-      "layer": "legacy",
-      "phase": 5,
+      "layer": "P",
+      "phase": 7,
       "budget": 0
     },
     "kernel/sus_path.h": {
@@ -458,28 +458,28 @@
       "budget": 0
     },
     "kernel/sus_mount.h": {
-      "layer": "legacy",
-      "phase": 5,
+      "layer": "F",
+      "phase": 7,
       "budget": 0
     },
     "kernel/sus_map.h": {
-      "layer": "legacy",
-      "phase": 5,
+      "layer": "F",
+      "phase": 7,
       "budget": 0
     },
     "kernel/susfs_uname.h": {
-      "layer": "legacy",
-      "phase": 5,
+      "layer": "F",
+      "phase": 7,
       "budget": 0
     },
     "kernel/susfs_kstat.h": {
-      "layer": "legacy",
-      "phase": 5,
+      "layer": "F",
+      "phase": 7,
       "budget": 0
     },
     "kernel/spoof_cmdline.h": {
-      "layer": "legacy",
-      "phase": 5,
+      "layer": "F",
+      "phase": 7,
       "budget": 0
     },
     "kernel/susfs_open_redirect.h": {
@@ -488,8 +488,8 @@
       "budget": 0
     },
     "kernel/susfs_avc_spoof.h": {
-      "layer": "legacy",
-      "phase": 5,
+      "layer": "F",
+      "phase": 7,
       "budget": 0
     },
     "kernel/susfs_supercall.h": {
@@ -498,8 +498,8 @@
       "budget": 0
     },
     "kernel/susfs_create_gate.h": {
-      "layer": "legacy",
-      "phase": 5,
+      "layer": "F",
+      "phase": 7,
       "budget": 0
     },
     "kernel/susfs_avc_view.h": {
