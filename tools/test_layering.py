@@ -60,6 +60,13 @@ class LayeringTest(unittest.TestCase):
         p = self.write('#include "susfs_avc_policy.h"\nsusfs_avc_set_enabled(hook, true);\n')
         self.assertEqual(lc.check_file(p, {"layer": "F"}), [])
 
+    def test_uname_adapter_uses_orig_accessor_and_policy_only(self) -> None:
+        p = self.write('susfs_uname_enabled = true;\nsusfs_uname_data_pad();\n')
+        violations = lc.check_file(p, {"layer": "F"})
+        self.assertEqual([v["rule"] for v in violations], ["F_SYMBOL", "F_SYMBOL"])
+        p = self.write('susfs_uname_orig_get();\nsusfs_uname_snapshot(ret, true, &v);\n')
+        self.assertEqual(lc.check_file(p, {"layer": "F"}), [])
+
     def test_umbrella_rejected_in_every_layer_and_wrapper(self) -> None:
         for layer in ("F", "L", "D", "P", "legacy"):
             for include in ('"susfs.h"', '<susfs.h>', '"../kernel/susfs.h"'):

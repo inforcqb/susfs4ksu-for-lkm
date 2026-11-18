@@ -383,9 +383,9 @@
       "budget": 999
     },
     "kernel/susfs_uname.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "F",
+      "phase": 8,
+      "budget": 0
     },
     "kernel/symbol_resolver.c": {
       "layer": "legacy",
@@ -508,6 +508,46 @@
       "budget": 0,
       "allowed_includes": [],
       "allowed_symbols": []
+    },
+    "kernel/susfs_uname_view.h": {
+      "layer": "L",
+      "phase": 8,
+      "budget": 0
+    },
+    "kernel/susfs_uname_policy.h": {
+      "layer": "L",
+      "phase": 8,
+      "budget": 0
+    },
+    "kernel/susfs_uname_policy.c": {
+      "layer": "L",
+      "phase": 8,
+      "budget": 0
+    },
+    "kernel/susfs_uname_data.h": {
+      "layer": "D",
+      "phase": 8,
+      "budget": 0
+    },
+    "kernel/susfs_uname_data.c": {
+      "layer": "D",
+      "phase": 8,
+      "budget": 0
+    },
+    "kernel/susfs_uname_phys.h": {
+      "layer": "P",
+      "phase": 8,
+      "budget": 0
+    },
+    "kernel/susfs_uname_phys.c": {
+      "layer": "P",
+      "phase": 8,
+      "budget": 0
+    },
+    "kernel/susfs_uname_values.h": {
+      "layer": "D",
+      "phase": 8,
+      "budget": 0
     }
   },
   "header_contract": {
@@ -535,7 +575,12 @@
       "susfs_or_entry.h",
       "susfs_avc_data.h",
       "susfs_avc_policy.h",
-      "susfs_avc_view.h"
+      "susfs_avc_view.h",
+      "susfs_uname_view.h",
+      "susfs_uname_policy.h",
+      "susfs_uname_data.h",
+      "susfs_uname_phys.h",
+      "susfs_uname_values.h"
     ]
   }
 }

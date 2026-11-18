@@ -750,6 +750,20 @@ jobs:
           path: /tmp/susfs_sc
           if-no-files-found: error
 
+      - name: Build uname contract device test
+        run: |
+          clang --target=aarch64-linux-gnu -O2 -nostdlib -static-pie \
+                -Wall -Wextra -Werror -fno-stack-protector -fno-builtin \
+                -fuse-ld=lld -Wl,-e,_start -Wl,-z,max-page-size=16384 \
+                -o /tmp/uname_contract_test tools/uname_contract_test.c
+
+      - name: Upload uname contract device test
+        uses: actions/upload-artifact@v6
+        with:
+          name: uname_contract_test
+          path: /tmp/uname_contract_test
+          if-no-files-found: error
+
       # Micro-benchmark for the syscall layers (same freestanding shape as the client above), used to answer
       # "what does the hook cost per call".
       - name: Build syscall micro-benchmark

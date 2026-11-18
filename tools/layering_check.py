@@ -27,6 +27,9 @@ RULES = {
             "susfs_avc_registered", "susfs_avc_exiting", "susfs_avc_ctl_lock",
             "susfs_avc_su_sid", "susfs_avc_priv_app_sid",
             "susfs_avc_enter_count", "susfs_avc_hit_count",
+            "susfs_uname_state_values", "susfs_uname_enabled",
+            "susfs_uname_registered", "susfs_uname_inline",
+            "susfs_uname_ctl_lock", "susfs_uname_data_pad",
         ],
     },
     "L": {
