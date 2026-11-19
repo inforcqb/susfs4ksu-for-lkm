@@ -466,9 +466,53 @@
       "budget": 999
     },
     "kernel/susfs_supercall.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "F",
+      "phase": 10,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_supercall_data.c": {
+      "layer": "D",
+      "phase": 10,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_supercall_data.h": {
+      "layer": "D",
+      "phase": 10,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_supercall_phys.c": {
+      "layer": "P",
+      "phase": 10,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_supercall_phys.h": {
+      "layer": "P",
+      "phase": 10,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_supercall_policy.c": {
+      "layer": "L",
+      "phase": 10,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_supercall_policy.h": {
+      "layer": "L",
+      "phase": 10,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
     },
     "kernel/susfs_uname.c": {
       "layer": "F",
@@ -581,8 +625,8 @@
       "budget": 0
     },
     "kernel/susfs_supercall.h": {
-      "layer": "legacy",
-      "phase": 5,
+      "layer": "F",
+      "phase": 10,
       "budget": 0
     },
     "kernel/susfs_create_gate.h": {
@@ -674,7 +718,10 @@
       "spoof_cmdline_phys.h",
       "susfs_dirent_data.h",
       "susfs_dirent_policy.h",
-      "susfs_dirent_phys.h"
+      "susfs_dirent_phys.h",
+      "susfs_supercall_data.h",
+      "susfs_supercall_policy.h",
+      "susfs_supercall_phys.h"
     ]
   }
 }
