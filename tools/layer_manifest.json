@@ -436,9 +436,32 @@
       "budget": 999
     },
     "kernel/susfs_main.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "F",
+      "phase": 13,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_main_data.c": {
+      "layer": "D",
+      "phase": 13,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_main_data.h": {
+      "layer": "D",
+      "phase": 13,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_main_phys.c": {
+      "layer": "P",
+      "phase": 13,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
     },
     "kernel/susfs_opath.c": {
       "layer": "F",
@@ -785,7 +808,8 @@
       "susfs_or_entry_data.h",
       "susfs_or_entry_phys.h",
       "susfs_opath_data.h",
-      "susfs_opath_phys.h"
+      "susfs_opath_phys.h",
+      "susfs_main_data.h"
     ]
   }
 }
