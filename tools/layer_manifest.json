@@ -441,14 +441,44 @@
       "budget": 999
     },
     "kernel/susfs_opath.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "F",
+      "phase": 12,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
     },
     "kernel/susfs_opath.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "F",
+      "phase": 12,
+      "budget": 0
+    },
+    "kernel/susfs_opath_data.c": {
+      "layer": "D",
+      "phase": 12,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_opath_data.h": {
+      "layer": "D",
+      "phase": 12,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_opath_phys.c": {
+      "layer": "P",
+      "phase": 12,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_opath_phys.h": {
+      "layer": "P",
+      "phase": 12,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
     },
     "kernel/susfs_open_redirect.c": {
       "layer": "legacy",
@@ -753,7 +783,9 @@
       "susfs_supercall_policy.h",
       "susfs_supercall_phys.h",
       "susfs_or_entry_data.h",
-      "susfs_or_entry_phys.h"
+      "susfs_or_entry_phys.h",
+      "susfs_opath_data.h",
+      "susfs_opath_phys.h"
     ]
   }
 }
