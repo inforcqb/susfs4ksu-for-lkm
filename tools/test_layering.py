@@ -67,6 +67,13 @@ class LayeringTest(unittest.TestCase):
         p = self.write('susfs_uname_orig_get();\nsusfs_uname_snapshot(ret, true, &v);\n')
         self.assertEqual(lc.check_file(p, {"layer": "F"}), [])
 
+    def test_hide_adapter_cannot_access_rule_state(self) -> None:
+        p = self.write('#include "susfs_hide_data.h"\nn_hide_modules = 0;\n')
+        rules = {v["rule"] for v in lc.check_file(p, {"layer": "F"})}
+        self.assertEqual(rules, {"F_INCLUDE", "F_SYMBOL"})
+        p = self.write('#include "susfs_hide_policy.h"\nhide_modules_command(buf, false);\n')
+        self.assertEqual(lc.check_file(p, {"layer": "F"}), [])
+
     def test_umbrella_rejected_in_every_layer_and_wrapper(self) -> None:
         for layer in ("F", "L", "D", "P", "legacy"):
             for include in ('"susfs.h"', '<susfs.h>', '"../kernel/susfs.h"'):

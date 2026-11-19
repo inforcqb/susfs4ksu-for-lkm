@@ -416,9 +416,9 @@
       "budget": 0
     },
     "kernel/susfs_hide_syms.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "F",
+      "phase": 15,
+      "budget": 0
     },
     "kernel/susfs_kprobe.h": {
       "layer": "P",
@@ -668,8 +668,8 @@
       "budget": 0
     },
     "kernel/susfs_hide_syms.h": {
-      "layer": "legacy",
-      "phase": 5,
+      "layer": "F",
+      "phase": 15,
       "budget": 0
     },
     "kernel/sus_mount.h": {
@@ -763,6 +763,46 @@
       "layer": "D",
       "phase": 8,
       "budget": 0
+    },
+    "kernel/susfs_hide_data.c": {
+      "layer": "D",
+      "phase": 15,
+      "budget": 0
+    },
+    "kernel/susfs_hide_data.h": {
+      "layer": "D",
+      "phase": 15,
+      "budget": 0
+    },
+    "kernel/susfs_hide_names.h": {
+      "layer": "D",
+      "phase": 15,
+      "budget": 0
+    },
+    "kernel/susfs_hide_policy.c": {
+      "layer": "L",
+      "phase": 15,
+      "budget": 0
+    },
+    "kernel/susfs_hide_policy.h": {
+      "layer": "L",
+      "phase": 15,
+      "budget": 0
+    },
+    "kernel/susfs_hide_view.h": {
+      "layer": "L",
+      "phase": 15,
+      "budget": 0
+    },
+    "kernel/susfs_hide_phys.c": {
+      "layer": "P",
+      "phase": 15,
+      "budget": 0
+    },
+    "kernel/susfs_hide_phys.h": {
+      "layer": "P",
+      "phase": 15,
+      "budget": 0
     }
   },
   "header_contract": {
@@ -809,7 +849,12 @@
       "susfs_or_entry_phys.h",
       "susfs_opath_data.h",
       "susfs_opath_phys.h",
-      "susfs_main_data.h"
+      "susfs_main_data.h",
+      "susfs_hide_data.h",
+      "susfs_hide_names.h",
+      "susfs_hide_policy.h",
+      "susfs_hide_view.h",
+      "susfs_hide_phys.h"
     ]
   }
 }

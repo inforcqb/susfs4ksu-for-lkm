@@ -20,6 +20,7 @@ RULES = {
             "linux/namei.h", "linux/path.h", "linux/dcache.h",
             "linux/kprobes.h", "susfs_kprobe.h",
             "susfs_avc_data.h",
+            "susfs_hide_data.h",
         ],
         "symbols": [
             "vfs_mkdir", "filename_parentat", "lookup_one_qstr_excl",
@@ -30,6 +31,12 @@ RULES = {
             "susfs_uname_state_values", "susfs_uname_enabled",
             "susfs_uname_registered", "susfs_uname_inline",
             "susfs_uname_ctl_lock", "susfs_uname_data_pad",
+            "n_hide_modules", "n_hide_modules_applied", "hide_modules_lock",
+            "hide_modules_pending_val", "hide_modules_pending_given",
+            "hide_syms_param_lock", "hide_syms_ready", "hide_modules_commit",
+            "hide_module_name_match", "hide_hit_count", "hide_enter_count",
+            "hide_layout_bad", "n_modlines_skipped", "n_kallsyms_mod_skipped",
+            "n_sysfs_rules_added", "n_sysfs_rules_failed",
         ],
     },
     "L": {
