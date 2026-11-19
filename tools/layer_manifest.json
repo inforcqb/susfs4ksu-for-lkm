@@ -126,9 +126,53 @@
       "allowed_symbols": []
     },
     "kernel/sus_dirent.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "F",
+      "phase": 9,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_dirent_data.c": {
+      "layer": "D",
+      "phase": 9,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_dirent_data.h": {
+      "layer": "D",
+      "phase": 9,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_dirent_phys.c": {
+      "layer": "P",
+      "phase": 9,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_dirent_phys.h": {
+      "layer": "P",
+      "phase": 9,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_dirent_policy.c": {
+      "layer": "L",
+      "phase": 9,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_dirent_policy.h": {
+      "layer": "L",
+      "phase": 9,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
     },
     "kernel/sus_map.c": {
       "layer": "legacy",
@@ -487,8 +531,8 @@
       "budget": 0
     },
     "kernel/susfs_dirent.h": {
-      "layer": "legacy",
-      "phase": 5,
+      "layer": "F",
+      "phase": 9,
       "budget": 0
     },
     "kernel/susfs_control.h": {
@@ -627,7 +671,10 @@
       "susfs_uname_values.h",
       "spoof_cmdline_data.h",
       "spoof_cmdline_policy.h",
-      "spoof_cmdline_phys.h"
+      "spoof_cmdline_phys.h",
+      "susfs_dirent_data.h",
+      "susfs_dirent_policy.h",
+      "susfs_dirent_phys.h"
     ]
   }
 }
