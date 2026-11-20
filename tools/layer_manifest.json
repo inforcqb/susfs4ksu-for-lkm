@@ -12,9 +12,9 @@
   ],
   "files": {
     "kernel/btf_layout.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 15,
+      "budget": 0
     },
     "kernel/btf_layout.h": {
       "layer": "P",
@@ -22,9 +22,9 @@
       "budget": 0
     },
     "kernel/fsnotify_lifetime.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 15,
+      "budget": 0
     },
     "kernel/fsnotify_lifetime.h": {
       "layer": "P",
@@ -32,9 +32,9 @@
       "budget": 0
     },
     "kernel/imports_guard.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 15,
+      "budget": 0
     },
     "kernel/ksu_allow_gate.c": {
       "layer": "legacy",
@@ -67,9 +67,9 @@
       "budget": 0
     },
     "kernel/patch_memory.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 15,
+      "budget": 0
     },
     "kernel/patch_memory.h": {
       "layer": "P",
@@ -450,9 +450,9 @@
       "allowed_symbols": []
     },
     "kernel/susfs_fp_hook.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 15,
+      "budget": 0
     },
     "kernel/susfs_fp_hook.h": {
       "layer": "P",
@@ -647,9 +647,9 @@
       "budget": 0
     },
     "kernel/symbol_resolver.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 15,
+      "budget": 0
     },
     "kernel/symbol_resolver.h": {
       "layer": "P",
