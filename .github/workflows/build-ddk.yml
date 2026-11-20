@@ -308,8 +308,11 @@ jobs:
           # emitted both the call site and the callee, so the type ids agree by construction:
           #   init_module / susfs_layers_down - the susfs_layers[] init/exit table
           #   susfs_tw_func                   - the supercall command table
+          #   hk_exec_clear_stopped / hk_nx_clear_page / hk_nx_neighbours
+          #     - hk_exec_nx_ops is a const table of same-module adapters only;
+          #       the kernel nofault call stays in hk_exec_write_entry (__nocfi noinline).
           # (The CFI runtime's own __cfi_check is filtered by the tool, not listed here.)
-          ALLOW="init_module,susfs_layers_down,susfs_tw_func,susfs_watch_freeing,hk_own_run,hk_write_run"
+          ALLOW="init_module,susfs_layers_down,susfs_tw_func,susfs_watch_freeing,hk_own_run,hk_write_run,hk_exec_clear_stopped,hk_nx_clear_page,hk_nx_neighbours"
           if command -v python3 >/dev/null 2>&1; then PY=python3
           elif command -v python >/dev/null 2>&1; then PY=python
           else
