@@ -13,6 +13,7 @@ on:
       - 'tools/susfs_avc_view_test.c'
       - 'tools/susfs_uname_view_test.c'
       - 'tools/susfs_hide_view_test.c'
+      - 'tools/hk_exec_nx_test.c'
       - '.github/workflows/layering.yml'
   pull_request:
     paths:
@@ -25,6 +26,7 @@ on:
       - 'tools/susfs_avc_view_test.c'
       - 'tools/susfs_uname_view_test.c'
       - 'tools/susfs_hide_view_test.c'
+      - 'tools/hk_exec_nx_test.c'
       - '.github/workflows/layering.yml'
   workflow_dispatch:
 
@@ -61,3 +63,7 @@ jobs:
           done
       - name: Enforce layering
         run: python tools/layering_check.py --strict
+      - name: ARM64 trampoline NX policy host test
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -I kernel tools/hk_exec_nx_test.c -o /tmp/test_hk_exec_nx
+          /tmp/test_hk_exec_nx
