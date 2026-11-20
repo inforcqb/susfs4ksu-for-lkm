@@ -107,6 +107,7 @@ int main(void)
 			for (i = 0; i < level; i++) saved[i] = *chain[i];
 			expect(&req, 0);
 			assert(req.cleared == level && flushes == 1);
+			assert(req.tables_cleared == level - 1);
 			for (i = 0; i < level; i++)
 				assert(*chain[i] == (saved[i] &
 					~(i + 1 == level ? HK_NX_LEAF : HK_NX_TABLE)));
@@ -128,6 +129,7 @@ int main(void)
 	before = *neighbour;
 	expect(&req, 0);
 	assert(req.cleared == 1 && *neighbour == before);
+	assert(req.tables_cleared == 1);
 
 	/* A neighbour that relies on the parent must not become executable. */
 	req = setup(12, 3);
