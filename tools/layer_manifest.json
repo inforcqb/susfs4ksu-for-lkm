@@ -37,24 +37,24 @@
       "budget": 0
     },
     "kernel/ksu_allow_gate.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 17,
+      "budget": 0
     },
     "kernel/ksu_allow_gate.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "L",
+      "phase": 17,
+      "budget": 0
     },
     "kernel/ksu_umount_gate.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 17,
+      "budget": 0
     },
     "kernel/ksu_umount_gate.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "L",
+      "phase": 17,
+      "budget": 0
     },
     "kernel/lsm_hook.c": {
       "layer": "legacy",
@@ -852,6 +852,26 @@
       "layer": "F",
       "phase": 16,
       "budget": 0
+    },
+    "kernel/ksu_allow_gate_data.c": {
+      "layer": "D",
+      "phase": 17,
+      "budget": 0
+    },
+    "kernel/ksu_allow_gate_data.h": {
+      "layer": "D",
+      "phase": 17,
+      "budget": 0
+    },
+    "kernel/ksu_umount_gate_data.c": {
+      "layer": "D",
+      "phase": 17,
+      "budget": 0
+    },
+    "kernel/ksu_umount_gate_data.h": {
+      "layer": "D",
+      "phase": 17,
+      "budget": 0
     }
   },
   "header_contract": {
@@ -907,7 +927,9 @@
       "susfs_enable_log_data.h",
       "susfs_enable_log_policy.h",
       "susfs_enable_log_phys.h",
-      "susfs_enable_log.h"
+      "susfs_enable_log.h",
+      "ksu_allow_gate_data.h",
+      "ksu_umount_gate_data.h"
     ]
   }
 }
