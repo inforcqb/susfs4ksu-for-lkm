@@ -475,9 +475,9 @@
       "budget": 999
     },
     "kernel/susfs_log.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "L",
+      "phase": 16,
+      "budget": 0
     },
     "kernel/susfs_main.c": {
       "layer": "F",
@@ -687,8 +687,8 @@
       "budget": 999
     },
     "kernel/susfs_helpers.h": {
-      "layer": "legacy",
-      "phase": 5,
+      "layer": "P",
+      "phase": 16,
       "budget": 0
     },
     "kernel/susfs_core.h": {
@@ -697,8 +697,8 @@
       "budget": 0
     },
     "kernel/sus_path.h": {
-      "layer": "legacy",
-      "phase": 5,
+      "layer": "F",
+      "phase": 16,
       "budget": 0
     },
     "kernel/susfs_dirent.h": {
@@ -707,8 +707,8 @@
       "budget": 0
     },
     "kernel/susfs_control.h": {
-      "layer": "legacy",
-      "phase": 5,
+      "layer": "L",
+      "phase": 16,
       "budget": 0
     },
     "kernel/susfs_hide_syms.h": {
@@ -847,6 +847,11 @@
       "layer": "P",
       "phase": 15,
       "budget": 0
+    },
+    "kernel/susfs_enable_log.h": {
+      "layer": "F",
+      "phase": 16,
+      "budget": 0
     }
   },
   "header_contract": {
@@ -901,7 +906,8 @@
       "susfs_hide_phys.h",
       "susfs_enable_log_data.h",
       "susfs_enable_log_policy.h",
-      "susfs_enable_log_phys.h"
+      "susfs_enable_log_phys.h",
+      "susfs_enable_log.h"
     ]
   }
 }
