@@ -401,9 +401,53 @@
       "allowed_symbols": []
     },
     "kernel/susfs_enable_log.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "F",
+      "phase": 14,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_enable_log_data.c": {
+      "layer": "D",
+      "phase": 14,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_enable_log_data.h": {
+      "layer": "D",
+      "phase": 14,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_enable_log_phys.c": {
+      "layer": "P",
+      "phase": 14,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_enable_log_phys.h": {
+      "layer": "P",
+      "phase": 14,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_enable_log_policy.c": {
+      "layer": "L",
+      "phase": 14,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
+    },
+    "kernel/susfs_enable_log_policy.h": {
+      "layer": "L",
+      "phase": 14,
+      "budget": 0,
+      "allowed_includes": [],
+      "allowed_symbols": []
     },
     "kernel/susfs_fp_hook.c": {
       "layer": "legacy",
@@ -854,7 +898,10 @@
       "susfs_hide_names.h",
       "susfs_hide_policy.h",
       "susfs_hide_view.h",
-      "susfs_hide_phys.h"
+      "susfs_hide_phys.h",
+      "susfs_enable_log_data.h",
+      "susfs_enable_log_policy.h",
+      "susfs_enable_log_phys.h"
     ]
   }
 }
