@@ -1349,22 +1349,10 @@ static int count_trace(const char *root)
 static u32 probe_threads = 1;	/* -t; 1 = single-threaded */
 static u32 probe_worker_rounds = 1;	/* per-worker trigger rounds */
 
-struct probe_shared {
-	volatile u32 next;
-	volatile u32 lock;
-	u32 count[PROBE_SLOT_COUNT];
-};
-
-/* Static, not mmap'd: the probe workers are CLONE_VM threads, so they share
- * this address space directly. */
-static struct probe_shared probe_sh_state;
-static struct probe_shared *probe_sh = &probe_sh_state;
-
 static u8 probe_thread_stacks[PROBE_MAX_THREADS][PROBE_THREAD_STACK]
 	__attribute__((aligned(16)));
 static volatile u32 probe_threads_done;
 static const char *probe_thread_root;
-static u32 probe_thread_range[PROBE_MAX_THREADS][2];
 
 /* clone(CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD): the child
  * starts on the new stack, i.e. its own C locals would be uninitialised stack,
@@ -1403,7 +1391,7 @@ static long probe_thread_start(void *stack_top, void (*entry)(void))
 }
 #endif
 
-static void probe_worker(const char *root, u32 wid, u32 start, u32 end);
+static void probe_worker(const char *root, u32 wid);
 
 /* The thread's own stack identifies its slot range: clone() gives it that stack
  * and nothing else distinguishes the workers. */
@@ -1434,8 +1422,7 @@ static void probe_thread_entry(void)
 {
 	u32 wid = probe_current_wid();
 
-	probe_worker(probe_thread_root, wid, probe_thread_range[wid][0],
-		     probe_thread_range[wid][1]);
+	probe_worker(probe_thread_root, wid);
 	__sync_fetch_and_add(&probe_threads_done, 1);
 	sys6(SYS_exit, 0, 0, 0, 0, 0, 0);
 	for (;;)
@@ -1530,31 +1517,19 @@ static u32 count_trace_event_buf(const char *trace_path, const char *event,
  * buffer and tracing_on, so there is no global lock: workers trigger and read
  * their own instance in parallel.  The kprobe events are registered once in the
  * global kprobe_events; the instance enables the events of its slot range. */
-static void probe_worker(const char *root, u32 wid, u32 start, u32 end)
+/* A worker only triggers: every instance enables every slot's event, all
+ * instances have tracing_on=1, so each worker's hits land in all instances and
+ * the parent reads instance 0 once after the join (that buffer already covers
+ * every trigger).  That is the "attach them all, trigger once" shape, made
+ * parallel over the trigger rounds. */
+static void probe_worker(const char *root, u32 wid)
 {
-	char path[256], ep[320];
-	char *buf = probe_trace_buf[wid];
-	u32 idx, r;
+	u32 r;
 
-	for (idx = start; idx < end && idx < PROBE_SLOT_COUNT; idx++) {
-		probe_inst_event(ep, sizeof(ep), root, wid,
-				 hit_probes[idx].event);
-		(void)write_path(ep, "1\n");
-	}
-	probe_inst_path(path, sizeof(path), root, wid, "trace");
-	(void)clear_path(path);
-	for (r = 0; r < probe_worker_rounds; r++) {
-		probe_inst_path(path, sizeof(path), root, wid, "trace");
-		(void)clear_path(path);
-		probe_inst_path(path, sizeof(path), root, wid, "tracing_on");
-		(void)write_path(path, "1\n");
+	(void)root;
+	(void)wid;
+	for (r = 0; r < probe_worker_rounds; r++)
 		probe_trigger_cheap();
-		(void)write_path(path, "0\n");
-		probe_inst_path(path, sizeof(path), root, wid, "trace");
-		for (idx = start; idx < end && idx < PROBE_SLOT_COUNT; idx++)
-			probe_sh->count[idx] +=
-				count_trace_event_buf(path, hit_probes[idx].event, buf);
-	}
 }
 
 static int probe_hits(void)
@@ -1595,13 +1570,13 @@ static int probe_hits(void)
 	}
 
 	if (probe_threads > 1) {
-		u32 i, started = 0, per, start, end;
+		u32 i, started = 0, idx;
+		char ep[320];
 
-		/* One tracefs instance per thread: own trace buffer and
-		 * tracing_on, so the workers trigger and read in parallel. */
-		per = (PROBE_SLOT_COUNT + probe_threads - 1) / probe_threads;
-		/* Split the total round budget, so the workers together trigger as
-		 * often as the single-threaded path. */
+		/* Attach them all, trigger in parallel: every instance enables
+		 * every slot's event and keeps tracing_on for the whole phase, so
+		 * every worker's hits land in all instances; one read of
+		 * instance 0 afterwards covers the whole run. */
 		probe_worker_rounds = probe_rounds / probe_threads;
 		if (!probe_worker_rounds)
 			probe_worker_rounds = 1;
@@ -1613,24 +1588,35 @@ static int probe_hits(void)
 				   AT_REMOVEDIR, 0, 0, 0);
 			(void)sys6(SYS_mkdirat, AT_FDCWD, (sysarg)path, 0755,
 				   0, 0, 0);
+			probe_inst_path(path, sizeof(path), root, i, "trace");
+			(void)clear_path(path);
+			for (idx = 0; idx < PROBE_SLOT_COUNT; idx++) {
+				probe_inst_event(ep, sizeof(ep), root, i,
+						 hit_probes[idx].event);
+				(void)write_path(ep, "1\n");
+			}
+			probe_inst_path(path, sizeof(path), root, i, "tracing_on");
+			(void)write_path(path, "1\n");
 		}
 		for (i = 1; i < probe_threads; i++) {
-			start = i * per;
-			if (start >= PROBE_SLOT_COUNT)
-				break;
-			end = start + per;
-			probe_thread_range[i][0] = start;
-			probe_thread_range[i][1] = end;
 			if (probe_thread_start(&probe_thread_stacks[i][PROBE_THREAD_STACK],
 					       probe_thread_entry) < 0)
 				break;
 			started++;
 		}
-		probe_worker(root, 0, 0, per);
+		probe_worker(root, 0);
 		while (probe_threads_done < started)
 			__sync_synchronize();
-		for (i = 0; i < PROBE_SLOT_COUNT; i++)
-			hit_probes[i].count += probe_sh->count[i];
+		for (i = 0; i < probe_threads && i < PROBE_MAX_THREADS; i++) {
+			probe_inst_path(path, sizeof(path), root, i, "tracing_on");
+			(void)write_path(path, "0\n");
+		}
+		/* Every instance holds the same triggers; read instance 0 once. */
+		probe_inst_path(path, sizeof(path), root, 0, "trace");
+		for (idx = 0; idx < PROBE_SLOT_COUNT; idx++)
+			hit_probes[idx].count +=
+				count_trace_event_buf(path, hit_probes[idx].event,
+						      probe_trace_buf[0]);
 		o_put(P "probe: trigger threads=");
 		o_dec(started + 1);
 		o_put("\n");
