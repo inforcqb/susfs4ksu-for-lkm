@@ -1368,7 +1368,7 @@ static u32 probe_run_threads(u32 want, u32 rounds)
 		per = 1;
 	probe_thread_rounds = per;
 	for (i = 0; i + 1 < want; i++) {
-		sysarg rc = sys6(SYS_clone, SIGCHLD, 0, 0, 0, 0);
+		sysarg rc = sys6(SYS_clone, SIGCHLD, 0, 0, 0, 0, 0);
 
 		if (rc == 0) {
 			probe_thread_main();
