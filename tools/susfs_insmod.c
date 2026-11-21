@@ -1492,25 +1492,30 @@ static u32 count_trace_event_buf(const char *trace_path, const char *event,
 				 char *buf)
 {
 	char needle[64];
-	u64 total = 0, n = 0, j;
+	u64 n = 0, j;
+	u32 total = 0;
 	sysarg fd;
 
 	fd = xopen(trace_path, O_RDONLY);
 	if (fd < 0)
 		return 0;
-	while (total < 65536) {
-		sysarg r = sys6(SYS_read, fd, (sysarg)(buf + total),
-				(sysarg)(65536 - total), 0, 0, 0);
-		if (r <= 0)
-			break;
-		total += (u64)r;
-	}
-	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
 	for (j = 0; event[j]; j++)
 		needle[n++] = event[j];
 	needle[n++] = ':';
 	needle[n] = 0;
-	return (u32)count_sub(buf, total, needle, n);
+	/* Read the whole trace, not just the first 64 KB: the parallel phase
+	 * accumulates every worker's hits into one instance, which is far more
+	 * than a single round.  seq_read() returns 0 at EOF after the last
+	 * chunk, so this cannot loop forever. */
+	for (;;) {
+		sysarg r = sys6(SYS_read, fd, (sysarg)buf, 65536, 0, 0, 0);
+
+		if (r <= 0)
+			break;
+		total += (u32)count_sub(buf, (u64)r, needle, n);
+	}
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+	return total;
 }
 
 /* Each worker owns one tracefs instance (instances/pwN) with its own trace
