@@ -872,7 +872,30 @@ static struct hit_probe hit_probes[] = {
 #undef PROBE_ROW
 
 static u32 probe_bits[SUSFS_HOOK_WORDS];
-#define PROBE_ROUNDS 1000
+/* One trigger round is enough to answer "did this entry run at all"; 100 rounds
+ * keeps a marginal entry visible without the 1000-round bring-up cost.  -p may
+ * override it: -p N. */
+#define PROBE_ROUNDS_DEFAULT 100
+static u32 probe_rounds = PROBE_ROUNDS_DEFAULT;
+
+/* A pure decimal, bounded so a typo cannot turn into a long probe run.  Returns
+ * 0 for anything that is not one. */
+static u32 parse_rounds(const char *s)
+{
+	u32 v = 0;
+
+	if (!*s)
+		return 0;
+	while (*s) {
+		if (*s < '0' || *s > '9')
+			return 0;
+		v = v * 10 + (u32)(*s - '0');
+		if (v > 1000000u)
+			return 0;
+		s++;
+	}
+	return v;
+}
 
 #define TRACE_ROOT "/sys/kernel/tracing/"
 #define TRACE_ALT  "/sys/kernel/debug/tracing/"
@@ -1324,6 +1347,9 @@ static int probe_hits(void)
 		o_put(P "probe: tracefs is not mounted; fallback stays the default\n");
 		return -1;
 	}
+	o_put(P "probe: rounds=");
+	o_dec(probe_rounds);
+	o_put("\n");
 	probe_path(path, sizeof(path), root, "tracing_on");
 	(void)write_path(path, "0\n");
 	probe_path(path, sizeof(path), root, "trace");
@@ -1346,7 +1372,7 @@ static int probe_hits(void)
 		goto out;
 	}
 
-	for (round = 0; round < PROBE_ROUNDS; round++) {
+	for (round = 0; round < probe_rounds; round++) {
 		probe_path(path, sizeof(path), root, "trace");
 		(void)clear_path(path);
 		probe_path(path, sizeof(path), root, "tracing_on");
@@ -1457,7 +1483,8 @@ static int patch_hook_map(char *img, u64 size, struct elf64_shdr *shdrs,
 static void usage(void)
 {
 	o_put(P "usage: susfs_insmod [-v] <module.ko> [module-params ...]\n");
-	o_put(P "       susfs_insmod -p\n");
+	o_put(P "       susfs_insmod -p [rounds] <module.ko> [module-params ...]\n");
+	o_put(P "       -p probes every slot before the load; rounds defaults to 100\n");
 	o_flush();
 	finish(2);
 }
@@ -1491,8 +1518,16 @@ void insmod_main(long argc, char **argv)
 	/* ---- argv ---- */
 	u = 1;
 	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'p' && argv[u][2] == 0) {
+		u32 rounds;
+
 		do_probe = 1;
 		u++;
+		/* Optional count: -p N.  A module path that starts with digits still
+		 * carries a '.' or '/', so parse_rounds() cannot swallow it. */
+		if (u < (u64)argc && (rounds = parse_rounds(argv[u])) != 0) {
+			probe_rounds = rounds;
+			u++;
+		}
 	}
 	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'P' && argv[u][2] == 0) {
 		do_probe = 1;
