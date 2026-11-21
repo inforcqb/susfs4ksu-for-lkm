@@ -1394,24 +1394,19 @@ static u32 count_trace_one(const char *root, u32 idx)
 	return (u32)count_sub(trace, total, needle, n);
 }
 
-/* One worker: claim the next untested slot from the shared map, test it under
- * the shared lock (trace and tracing_on are global), record the count, repeat;
- * exits once there is nothing left to claim.  The forked children share this
- * mmap'd state, so the claim is one atomic add on it. */
-static void probe_worker(const char *root)
+/* Slots are pre-assigned (range slicing) rather than claimed with an atomic add:
+ * the claim only adds contention and the trace buffer is global anyway.  A slot
+ * that stays at 0 gets a few retries; one trigger is the common case. */
+#define PROBE_SLOT_RETRIES 3
+
+static void probe_worker(const char *root, u32 start, u32 end)
 {
 	char path[256];
 	u32 idx, r;
 
-	for (;;) {
-		idx = __sync_fetch_and_add(&probe_sh->next, 1);
-		if (idx >= PROBE_SLOT_COUNT)
-			return;
+	for (idx = start; idx < end && idx < PROBE_SLOT_COUNT; idx++) {
 		probe_sh_lock();
-		/* One trigger is the common case; only a slot that stayed at 0
-		 * is retried, up to the probe-round budget, and the loop stops
-		 * as soon as the slot has a hit. */
-		for (r = 0; r < probe_rounds && !probe_sh->count[idx]; r++) {
+		for (r = 0; r < PROBE_SLOT_RETRIES && !probe_sh->count[idx]; r++) {
 			probe_path(path, sizeof(path), root, "trace");
 			(void)clear_path(path);
 			probe_path(path, sizeof(path), root, "tracing_on");
@@ -1472,21 +1467,31 @@ static int probe_hits(void)
 			o_put(P "probe: shared map failed; single-threaded\n");
 			probe_threads = 1;
 		} else {
+			u32 per, start, end;
+
 			probe_sh = (struct probe_shared *)sh;
 			probe_sh->next = 0;
 			probe_sh->lock = 0;
-			for (i = 0; i + 1 < probe_threads; i++) {
-				sysarg rc = sys6(SYS_clone, SIGCHLD, 0, 0, 0, 0, 0);
+			/* Pre-assign each worker a slot range; the trace buffer is
+			 * global, so a claim protocol would only add contention. */
+			per = (PROBE_SLOT_COUNT + probe_threads - 1) / probe_threads;
+			for (i = 1; i < probe_threads; i++) {
+				sysarg rc;
 
+				start = i * per;
+				if (start >= PROBE_SLOT_COUNT)
+					break;
+				end = start + per;
+				rc = sys6(SYS_clone, SIGCHLD, 0, 0, 0, 0, 0);
 				if (rc == 0) {
-					probe_worker(root);
+					probe_worker(root, start, end);
 					sys6(SYS_exit, 0, 0, 0, 0, 0, 0);
 				}
 				if (rc < 0)
 					break;
 				started++;
 			}
-			probe_worker(root);
+			probe_worker(root, 0, per);
 			for (i = 0; i < started; i++)
 				(void)sys6(SYS_wait4, -1, 0, 0, 0, 0, 0);
 			for (i = 0; i < PROBE_SLOT_COUNT; i++)
