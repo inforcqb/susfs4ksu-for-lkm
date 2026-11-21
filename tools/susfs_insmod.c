@@ -1376,7 +1376,8 @@ probe_thread_start(void *stack_top, void (*entry)(void))
 	__asm__ volatile(
 		"mov x5, x1\n"
 		"mov x1, x0\n"
-		"mov x0, #0x10f00\n"		/* VM|FS|FILES|SIGHAND|THREAD */
+		"mov x0, #0x0f00\n"		/* VM|FS|FILES|SIGHAND */
+		"movk x0, #0x1, lsl #16\n"	/* ...|THREAD = 0x10f00 */
 		"mov x2, xzr\n"
 		"mov x3, xzr\n"
 		"mov x4, xzr\n"
