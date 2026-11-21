@@ -1347,6 +1347,7 @@ static int count_trace(const char *root)
 #define PROBE_THREAD_STACK 16384
 
 static u32 probe_threads = 1;	/* -t; 1 = single-threaded */
+static u32 probe_worker_rounds = 1;	/* per-worker trigger rounds */
 
 struct probe_shared {
 	volatile u32 next;
@@ -1542,7 +1543,7 @@ static void probe_worker(const char *root, u32 wid, u32 start, u32 end)
 	}
 	probe_inst_path(path, sizeof(path), root, wid, "trace");
 	(void)clear_path(path);
-	for (r = 0; r < probe_rounds; r++) {
+	for (r = 0; r < probe_worker_rounds; r++) {
 		probe_inst_path(path, sizeof(path), root, wid, "trace");
 		(void)clear_path(path);
 		probe_inst_path(path, sizeof(path), root, wid, "tracing_on");
@@ -1599,6 +1600,11 @@ static int probe_hits(void)
 		/* One tracefs instance per thread: own trace buffer and
 		 * tracing_on, so the workers trigger and read in parallel. */
 		per = (PROBE_SLOT_COUNT + probe_threads - 1) / probe_threads;
+		/* Split the total round budget, so the workers together trigger as
+		 * often as the single-threaded path. */
+		probe_worker_rounds = probe_rounds / probe_threads;
+		if (!probe_worker_rounds)
+			probe_worker_rounds = 1;
 		probe_thread_root = root;
 		probe_threads_done = 0;
 		for (i = 0; i < probe_threads && i < PROBE_MAX_THREADS; i++) {
