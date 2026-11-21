@@ -185,14 +185,14 @@
       "budget": 999
     },
     "kernel/sus_mount_identity.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 18,
+      "budget": 0
     },
     "kernel/sus_mount_identity.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 18,
+      "budget": 0
     },
     "kernel/sus_mount_idmap.c": {
       "layer": "D",
@@ -219,14 +219,14 @@
       "allowed_symbols": []
     },
     "kernel/sus_mount_policy.c": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 18,
+      "budget": 0
     },
     "kernel/sus_mount_policy.h": {
-      "layer": "legacy",
-      "phase": 0,
-      "budget": 999
+      "layer": "P",
+      "phase": 18,
+      "budget": 0
     },
     "kernel/sus_mount_prefix.c": {
       "layer": "D",
@@ -872,6 +872,36 @@
       "layer": "D",
       "phase": 17,
       "budget": 0
+    },
+    "kernel/sus_mount_identity_logic.c": {
+      "layer": "L",
+      "phase": 18,
+      "budget": 0
+    },
+    "kernel/sus_mount_identity_logic.h": {
+      "layer": "L",
+      "phase": 18,
+      "budget": 0
+    },
+    "kernel/sus_mount_identity_view.h": {
+      "layer": "L",
+      "phase": 18,
+      "budget": 0
+    },
+    "kernel/sus_mount_identity_data.c": {
+      "layer": "D",
+      "phase": 18,
+      "budget": 0
+    },
+    "kernel/sus_mount_identity_data.h": {
+      "layer": "D",
+      "phase": 18,
+      "budget": 0
+    },
+    "kernel/sus_mount_identity_values.h": {
+      "layer": "D",
+      "phase": 18,
+      "budget": 0
     }
   },
   "header_contract": {
@@ -929,7 +959,13 @@
       "susfs_enable_log_phys.h",
       "susfs_enable_log.h",
       "ksu_allow_gate_data.h",
-      "ksu_umount_gate_data.h"
+      "ksu_umount_gate_data.h",
+      "sus_mount_identity.h",
+      "sus_mount_policy.h",
+      "sus_mount_identity_logic.h",
+      "sus_mount_identity_view.h",
+      "sus_mount_identity_data.h",
+      "sus_mount_identity_values.h"
     ]
   }
 }
