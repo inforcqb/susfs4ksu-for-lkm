@@ -1344,6 +1344,7 @@ static int count_trace(const char *root)
 }
 
 #define PROBE_MAX_THREADS 12
+#define PROBE_THREAD_STACK 16384
 
 static u32 probe_threads = 1;	/* -t; 1 = single-threaded */
 
@@ -1353,7 +1354,54 @@ struct probe_shared {
 	u32 count[PROBE_SLOT_COUNT];
 };
 
-static struct probe_shared *probe_sh;
+/* Static, not mmap'd: the probe workers are CLONE_VM threads, so they share
+ * this address space directly. */
+static struct probe_shared probe_sh_state;
+static struct probe_shared *probe_sh = &probe_sh_state;
+
+static u8 probe_thread_stacks[PROBE_MAX_THREADS][PROBE_THREAD_STACK]
+	__attribute__((aligned(16)));
+static volatile u32 probe_threads_done;
+static const char *probe_thread_root;
+static u32 probe_thread_lo, probe_thread_hi;
+
+/* clone(CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD): the child
+ * starts on the new stack, i.e. its own C locals would be uninitialised stack,
+ * so the entry is reached from this naked trampoline through x5 and ends with
+ * exit(); the parent returns the clone result.  x5 survives the syscall (only
+ * x0 carries the result). */
+static long __attribute__((naked))
+probe_thread_start(void *stack_top, void (*entry)(void))
+{
+	__asm__ volatile(
+		"mov x5, x1\n"
+		"mov x1, x0\n"
+		"mov x0, #0x10f00\n"		/* VM|FS|FILES|SIGHAND|THREAD */
+		"mov x2, xzr\n"
+		"mov x3, xzr\n"
+		"mov x4, xzr\n"
+		"mov x8, #220\n"		/* __NR_clone */
+		"svc #0\n"
+		"cbnz x0, 1f\n"			/* parent: return the tid */
+		"mov x29, xzr\n"
+		"mov x30, xzr\n"
+		"blr x5\n"			/* child: run the entry on its stack */
+		"mov x0, xzr\n"
+		"mov x8, #93\n"			/* __NR_exit: end this thread */
+		"svc #0\n"
+		"1: ret\n");
+}
+
+static void probe_worker(const char *root, u32 start, u32 end);
+
+static void probe_thread_entry(void)
+{
+	probe_worker(probe_thread_root, probe_thread_lo, probe_thread_hi);
+	__sync_fetch_and_add(&probe_threads_done, 1);
+	sys6(SYS_exit, 0, 0, 0, 0, 0, 0);
+	for (;;)
+		;
+}
 
 static void probe_sh_lock(void)
 {
@@ -1457,49 +1505,33 @@ static int probe_hits(void)
 	}
 
 	if (probe_threads > 1) {
-		u32 i, started = 0;
-		sysarg sh;
+		u32 i, started = 0, per, start, end;
 
-		sh = sys6(SYS_mmap, 0, (sysarg)sizeof(*probe_sh),
-			  PROT_READ | PROT_WRITE,
-			  MAP_SHARED | 0x20 /* MAP_ANONYMOUS */, -1, 0);
-		if (sh < 0) {
-			o_put(P "probe: shared map failed; single-threaded\n");
-			probe_threads = 1;
-		} else {
-			u32 per, start, end;
-
-			probe_sh = (struct probe_shared *)sh;
-			probe_sh->next = 0;
-			probe_sh->lock = 0;
-			/* Pre-assign each worker a slot range; the trace buffer is
-			 * global, so a claim protocol would only add contention. */
-			per = (PROBE_SLOT_COUNT + probe_threads - 1) / probe_threads;
-			for (i = 1; i < probe_threads; i++) {
-				sysarg rc;
-
-				start = i * per;
-				if (start >= PROBE_SLOT_COUNT)
-					break;
-				end = start + per;
-				rc = sys6(SYS_clone, SIGCHLD, 0, 0, 0, 0, 0);
-				if (rc == 0) {
-					probe_worker(root, start, end);
-					sys6(SYS_exit, 0, 0, 0, 0, 0, 0);
-				}
-				if (rc < 0)
-					break;
-				started++;
-			}
-			probe_worker(root, 0, per);
-			for (i = 0; i < started; i++)
-				(void)sys6(SYS_wait4, -1, 0, 0, 0, 0, 0);
-			for (i = 0; i < PROBE_SLOT_COUNT; i++)
-				hit_probes[i].count += probe_sh->count[i];
-			o_put(P "probe: trigger workers=");
-			o_dec(started + 1);
-			o_put("\n");
+		/* Pre-assign each thread a slot range; the trace buffer is
+		 * global, so a claim protocol would only add contention. */
+		per = (PROBE_SLOT_COUNT + probe_threads - 1) / probe_threads;
+		probe_thread_root = root;
+		probe_threads_done = 0;
+		for (i = 1; i < probe_threads; i++) {
+			start = i * per;
+			if (start >= PROBE_SLOT_COUNT)
+				break;
+			end = start + per;
+			probe_thread_lo = start;
+			probe_thread_hi = end;
+			if (probe_thread_start(&probe_thread_stacks[i][PROBE_THREAD_STACK],
+					       probe_thread_entry) < 0)
+				break;
+			started++;
 		}
+		probe_worker(root, 0, per);
+		while (probe_threads_done < started)
+			__sync_synchronize();
+		for (i = 0; i < PROBE_SLOT_COUNT; i++)
+			hit_probes[i].count += probe_sh->count[i];
+		o_put(P "probe: trigger threads=");
+		o_dec(started + 1);
+		o_put("\n");
 	}
 	if (probe_threads <= 1) {
 		u64 round;
