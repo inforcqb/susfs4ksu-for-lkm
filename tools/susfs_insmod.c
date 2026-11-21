@@ -119,6 +119,9 @@ typedef __INTPTR_TYPE__ sysarg;
 #define SYS_removexattr	14
 #define SYS_readlinkat	78
 #define SYS_unshare	97
+#define SYS_clone	220
+#define SYS_wait4	260
+#define SIGCHLD		17
 #define SYS_uname	160
 #define SYS_getpid	172
 #define SYS_process_vm_readv	270
@@ -1337,6 +1340,52 @@ static int count_trace(const char *root)
 	return 0;
 }
 
+#define PROBE_MAX_THREADS 12
+
+static u32 probe_threads = 1;	/* -t; 1 = single-threaded */
+static u32 probe_thread_rounds;
+
+static void probe_thread_main(void)
+{
+	u32 i;
+
+	for (i = 0; i < probe_thread_rounds; i++)
+		probe_trigger_cheap();
+}
+
+/* Split the trigger rounds across @want processes (fork; a refused clone simply
+ * leaves fewer and the main process takes the rest).  A thread with a swapped
+ * stack would read its own locals from uninitialised stack, so this forks: the
+ * child keeps a copy of the parent stack, enters probe_thread_main() and exits,
+ * and the parent reaps it.  The caller turns tracing on before and off after;
+ * the kprobe hit counts are kernel-global, so the processes add up. */
+static u32 probe_run_threads(u32 want, u32 rounds)
+{
+	u32 per = rounds / want;
+	u32 started = 0, i, main_rounds;
+
+	if (!per)
+		per = 1;
+	probe_thread_rounds = per;
+	for (i = 0; i + 1 < want; i++) {
+		sysarg rc = sys6(SYS_clone, SIGCHLD, 0, 0, 0, 0);
+
+		if (rc == 0) {
+			probe_thread_main();
+			sys6(SYS_exit, 0, 0, 0, 0, 0, 0);
+		}
+		if (rc < 0)
+			break;
+		started++;
+	}
+	main_rounds = rounds - per * started;
+	for (i = 0; i < main_rounds; i++)
+		probe_trigger_cheap();
+	for (i = 0; i < started; i++)
+		(void)sys6(SYS_wait4, -1, 0, 0, 0, 0, 0);
+	return started;
+}
+
 static int probe_hits(void)
 {
 	char root[128], path[256];
@@ -1349,6 +1398,8 @@ static int probe_hits(void)
 	}
 	o_put(P "probe: rounds=");
 	o_dec(probe_rounds);
+	o_put(P " threads=");
+	o_dec(probe_threads);
 	o_put("\n");
 	probe_path(path, sizeof(path), root, "tracing_on");
 	(void)write_path(path, "0\n");
@@ -1372,15 +1423,29 @@ static int probe_hits(void)
 		goto out;
 	}
 
-	for (round = 0; round < probe_rounds; round++) {
-		probe_path(path, sizeof(path), root, "trace");
-		(void)clear_path(path);
+	if (probe_threads > 1) {
+		u32 started;
+
 		probe_path(path, sizeof(path), root, "tracing_on");
 		(void)write_path(path, "1\n");
-		probe_trigger_cheap();
+		started = probe_run_threads(probe_threads, probe_rounds);
 		(void)write_path(path, "0\n");
+		o_put(P "probe: trigger workers=");
+		o_dec(started + 1);
+		o_put("\n");
 		if (count_trace(root))
 			goto out;
+	} else {
+		for (round = 0; round < probe_rounds; round++) {
+			probe_path(path, sizeof(path), root, "trace");
+			(void)clear_path(path);
+			probe_path(path, sizeof(path), root, "tracing_on");
+			(void)write_path(path, "1\n");
+			probe_trigger_cheap();
+			(void)write_path(path, "0\n");
+			if (count_trace(root))
+				goto out;
+		}
 	}
 
 	/* Namespace/mount triggers are destructive to a private mount namespace
@@ -1483,8 +1548,9 @@ static int patch_hook_map(char *img, u64 size, struct elf64_shdr *shdrs,
 static void usage(void)
 {
 	o_put(P "usage: susfs_insmod [-v] <module.ko> [module-params ...]\n");
-	o_put(P "       susfs_insmod -p [rounds] <module.ko> [module-params ...]\n");
+	o_put(P "       susfs_insmod -p [rounds] [-t [threads]] <module.ko> [module-params ...]\n");
 	o_put(P "       -p probes every slot before the load; rounds defaults to 100\n");
+	o_put(P "       -t splits the probe triggers over threads (default 4, max 12; needs -p)\n");
 	o_flush();
 	finish(2);
 }
@@ -1537,6 +1603,23 @@ void insmod_main(long argc, char **argv)
 	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'v' && argv[u][2] == 0) {
 		verbose = 1;
 		u++;
+	}
+	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 't' && argv[u][2] == 0) {
+		u32 n;
+
+		if (!do_probe)
+			die("-t needs -p or -P (the probe mode)", -22);
+		u++;
+		/* Optional count: -t [threads].  Without one, 4 threads; capped at
+		 * PROBE_MAX_THREADS. */
+		if (u < (u64)argc && (n = parse_rounds(argv[u])) != 0) {
+			u++;
+			if (n > PROBE_MAX_THREADS)
+				n = PROBE_MAX_THREADS;
+			probe_threads = n;
+		} else {
+			probe_threads = 4;
+		}
 	}
 	if (u >= (u64)argc)
 		usage();
