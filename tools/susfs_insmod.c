@@ -139,6 +139,7 @@ typedef __INTPTR_TYPE__ sysarg;
 #define PROT_READ	1
 #define PROT_WRITE	2
 #define MAP_PRIVATE	2
+#define MAP_SHARED	1
 
 /* The only host-dependent line in this file: the actual svc on the target, a shim
  * when the ELF/kallsyms/vermagic logic is exercised off-device
@@ -883,6 +884,8 @@ static u32 probe_rounds = PROBE_ROUNDS_DEFAULT;
 
 /* A pure decimal, bounded so a typo cannot turn into a long probe run.  Returns
  * 0 for anything that is not one. */
+#define PROBE_SLOT_COUNT (sizeof(hit_probes) / sizeof(hit_probes[0]))
+
 static u32 parse_rounds(const char *s)
 {
 	u32 v = 0;
@@ -1343,53 +1346,83 @@ static int count_trace(const char *root)
 #define PROBE_MAX_THREADS 12
 
 static u32 probe_threads = 1;	/* -t; 1 = single-threaded */
-static u32 probe_thread_rounds;
 
-static void probe_thread_main(void)
+struct probe_shared {
+	volatile u32 next;
+	volatile u32 lock;
+	u32 count[PROBE_SLOT_COUNT];
+};
+
+static struct probe_shared *probe_sh;
+
+static void probe_sh_lock(void)
 {
-	u32 i;
-
-	for (i = 0; i < probe_thread_rounds; i++)
-		probe_trigger_cheap();
+	while (__sync_lock_test_and_set(&probe_sh->lock, 1)) {
+		while (probe_sh->lock)
+			;
+	}
 }
 
-/* Split the trigger rounds across @want processes (fork; a refused clone simply
- * leaves fewer and the main process takes the rest).  A thread with a swapped
- * stack would read its own locals from uninitialised stack, so this forks: the
- * child keeps a copy of the parent stack, enters probe_thread_main() and exits,
- * and the parent reaps it.  The caller turns tracing on before and off after;
- * the kprobe hit counts are kernel-global, so the processes add up. */
-static u32 probe_run_threads(u32 want, u32 rounds)
+static void probe_sh_unlock(void)
 {
-	u32 per = rounds / want;
-	u32 started = 0, i, main_rounds;
+	__sync_lock_release(&probe_sh->lock);
+}
 
-	if (!per)
-		per = 1;
-	probe_thread_rounds = per;
-	for (i = 0; i + 1 < want; i++) {
-		sysarg rc = sys6(SYS_clone, SIGCHLD, 0, 0, 0, 0, 0);
+static u32 count_trace_one(const char *root, u32 idx)
+{
+	char path[256], needle[64];
+	static char trace[65536];
+	u64 total = 0, n = 0, j;
+	sysarg fd;
 
-		if (rc == 0) {
-			probe_thread_main();
-			sys6(SYS_exit, 0, 0, 0, 0, 0, 0);
-		}
-		if (rc < 0)
+	probe_path(path, sizeof(path), root, "trace");
+	fd = xopen(path, O_RDONLY);
+	if (fd < 0)
+		return 0;
+	while (total < sizeof(trace)) {
+		sysarg r = sys6(SYS_read, fd, (sysarg)(trace + total),
+				(sysarg)(sizeof(trace) - total), 0, 0, 0);
+		if (r <= 0)
 			break;
-		started++;
+		total += (u64)r;
 	}
-	main_rounds = rounds - per * started;
-	for (i = 0; i < main_rounds; i++)
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+	for (j = 0; hit_probes[idx].event[j]; j++)
+		needle[n++] = hit_probes[idx].event[j];
+	needle[n++] = ':';
+	needle[n] = 0;
+	return (u32)count_sub(trace, total, needle, n);
+}
+
+/* One worker: claim the next untested slot from the shared map, test it under
+ * the shared lock (trace and tracing_on are global), record the count, repeat;
+ * exits once there is nothing left to claim.  The forked children share this
+ * mmap'd state, so the claim is one atomic add on it. */
+static void probe_worker(const char *root)
+{
+	char path[256];
+	u32 idx;
+
+	for (;;) {
+		idx = __sync_fetch_and_add(&probe_sh->next, 1);
+		if (idx >= PROBE_SLOT_COUNT)
+			return;
+		probe_sh_lock();
+		probe_path(path, sizeof(path), root, "trace");
+		(void)clear_path(path);
+		probe_path(path, sizeof(path), root, "tracing_on");
+		(void)write_path(path, "1\n");
 		probe_trigger_cheap();
-	for (i = 0; i < started; i++)
-		(void)sys6(SYS_wait4, -1, 0, 0, 0, 0, 0);
-	return started;
+		(void)write_path(path, "0\n");
+		probe_sh->count[idx] += count_trace_one(root, idx);
+		probe_sh_unlock();
+	}
 }
 
 static int probe_hits(void)
 {
 	char root[128], path[256];
-	u64 i, round, armed = 0;
+	u64 i, armed = 0;
 	int rc = -1;
 
 	if (probe_root(root, sizeof(root))) {
@@ -1424,18 +1457,43 @@ static int probe_hits(void)
 	}
 
 	if (probe_threads > 1) {
-		u32 started;
+		u32 i, started = 0;
+		sysarg sh;
 
-		probe_path(path, sizeof(path), root, "tracing_on");
-		(void)write_path(path, "1\n");
-		started = probe_run_threads(probe_threads, probe_rounds);
-		(void)write_path(path, "0\n");
-		o_put(P "probe: trigger workers=");
-		o_dec(started + 1);
-		o_put("\n");
-		if (count_trace(root))
-			goto out;
-	} else {
+		sh = sys6(SYS_mmap, 0, (sysarg)sizeof(*probe_sh),
+			  PROT_READ | PROT_WRITE,
+			  MAP_SHARED | 0x20 /* MAP_ANONYMOUS */, -1, 0);
+		if (sh < 0) {
+			o_put(P "probe: shared map failed; single-threaded\n");
+			probe_threads = 1;
+		} else {
+			probe_sh = (struct probe_shared *)sh;
+			probe_sh->next = 0;
+			probe_sh->lock = 0;
+			for (i = 0; i + 1 < probe_threads; i++) {
+				sysarg rc = sys6(SYS_clone, SIGCHLD, 0, 0, 0, 0, 0);
+
+				if (rc == 0) {
+					probe_worker(root);
+					sys6(SYS_exit, 0, 0, 0, 0, 0, 0);
+				}
+				if (rc < 0)
+					break;
+				started++;
+			}
+			probe_worker(root);
+			for (i = 0; i < started; i++)
+				(void)sys6(SYS_wait4, -1, 0, 0, 0, 0, 0);
+			for (i = 0; i < PROBE_SLOT_COUNT; i++)
+				hit_probes[i].count += probe_sh->count[i];
+			o_put(P "probe: trigger workers=");
+			o_dec(started + 1);
+			o_put("\n");
+		}
+	}
+	if (probe_threads <= 1) {
+		u64 round;
+
 		for (round = 0; round < probe_rounds; round++) {
 			probe_path(path, sizeof(path), root, "trace");
 			(void)clear_path(path);
