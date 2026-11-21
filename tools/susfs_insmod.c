@@ -1401,20 +1401,25 @@ static u32 count_trace_one(const char *root, u32 idx)
 static void probe_worker(const char *root)
 {
 	char path[256];
-	u32 idx;
+	u32 idx, r;
 
 	for (;;) {
 		idx = __sync_fetch_and_add(&probe_sh->next, 1);
 		if (idx >= PROBE_SLOT_COUNT)
 			return;
 		probe_sh_lock();
-		probe_path(path, sizeof(path), root, "trace");
-		(void)clear_path(path);
-		probe_path(path, sizeof(path), root, "tracing_on");
-		(void)write_path(path, "1\n");
-		probe_trigger_cheap();
-		(void)write_path(path, "0\n");
-		probe_sh->count[idx] += count_trace_one(root, idx);
+		/* One trigger is the common case; only a slot that stayed at 0
+		 * is retried, up to the probe-round budget, and the loop stops
+		 * as soon as the slot has a hit. */
+		for (r = 0; r < probe_rounds && !probe_sh->count[idx]; r++) {
+			probe_path(path, sizeof(path), root, "trace");
+			(void)clear_path(path);
+			probe_path(path, sizeof(path), root, "tracing_on");
+			(void)write_path(path, "1\n");
+			probe_trigger_cheap();
+			(void)write_path(path, "0\n");
+			probe_sh->count[idx] += count_trace_one(root, idx);
+		}
 		probe_sh_unlock();
 	}
 }
@@ -1431,7 +1436,7 @@ static int probe_hits(void)
 	}
 	o_put(P "probe: rounds=");
 	o_dec(probe_rounds);
-	o_put(P " threads=");
+	o_put(" threads=");
 	o_dec(probe_threads);
 	o_put("\n");
 	probe_path(path, sizeof(path), root, "tracing_on");
