@@ -1370,6 +1370,7 @@ static u32 probe_thread_lo, probe_thread_hi;
  * so the entry is reached from this naked trampoline through x5 and ends with
  * exit(); the parent returns the clone result.  x5 survives the syscall (only
  * x0 carries the result). */
+#if defined(__aarch64__)
 static long __attribute__((naked))
 probe_thread_start(void *stack_top, void (*entry)(void))
 {
@@ -1392,6 +1393,14 @@ probe_thread_start(void *stack_top, void (*entry)(void))
 		"svc #0\n"
 		"1: ret\n");
 }
+#else	/* host test build (tools/insmod_match_test.c includes this file) */
+static long probe_thread_start(void *stack_top, void (*entry)(void))
+{
+	(void)stack_top;
+	(void)entry;
+	return -1;	/* no threads on the host build */
+}
+#endif
 
 static void probe_worker(const char *root, u32 start, u32 end);
 
