@@ -68,6 +68,8 @@ Ported from: [susfs4ksu](https://gitlab.com/simonpunk/susfs4ksu) (feature logic 
 
 [KallRecon](https://github.com/Dere3046/KallRecon)  
 
+[HooKern](https://github.com/Dere3046/HooKern)
+
 ## ⚠️ Disclaimer
 
 For technical research and study only. Use at your own risk.

@@ -67,6 +67,8 @@ GPL-2.0，见 [LICENSE](LICENSE)
 
 [KallRecon](https://github.com/Dere3046/KallRecon)  
 
+[HooKern](https://github.com/Dere3046/HooKern)
+
 ## ⚠️ 免责声明
 
 仅用于技术研究与学习。在自担风险的前提下使用。
