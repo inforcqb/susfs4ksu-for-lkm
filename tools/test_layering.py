@@ -53,6 +53,49 @@ class LayeringTest(unittest.TestCase):
         text = "#if 0\n#include <linux/namei.h>\n#else\nok\n#endif\n"
         self.assertNotIn("namei", lc.remove_if0(text))
 
+    def test_avc_adapter_cannot_reach_private_state(self) -> None:
+        p = self.write('#include "susfs_avc_data.h"\nsusfs_avc_registered = true;\n')
+        rules = {v["rule"] for v in lc.check_file(p, {"layer": "F"})}
+        self.assertEqual(rules, {"F_INCLUDE", "F_SYMBOL"})
+        p = self.write('#include "susfs_avc_policy.h"\nsusfs_avc_set_enabled(hook, true);\n')
+        self.assertEqual(lc.check_file(p, {"layer": "F"}), [])
+
+    def test_uname_adapter_uses_orig_accessor_and_policy_only(self) -> None:
+        p = self.write('susfs_uname_enabled = true;\nsusfs_uname_data_pad();\n')
+        violations = lc.check_file(p, {"layer": "F"})
+        self.assertEqual([v["rule"] for v in violations], ["F_SYMBOL", "F_SYMBOL"])
+        p = self.write('susfs_uname_orig_get();\nsusfs_uname_snapshot(ret, true, &v);\n')
+        self.assertEqual(lc.check_file(p, {"layer": "F"}), [])
+
+    def test_hide_adapter_cannot_access_rule_state(self) -> None:
+        p = self.write('#include "susfs_hide_data.h"\nn_hide_modules = 0;\n')
+        rules = {v["rule"] for v in lc.check_file(p, {"layer": "F"})}
+        self.assertEqual(rules, {"F_INCLUDE", "F_SYMBOL"})
+        p = self.write('#include "susfs_hide_policy.h"\nhide_modules_command(buf, false);\n')
+        self.assertEqual(lc.check_file(p, {"layer": "F"}), [])
+
+    def test_umbrella_rejected_in_every_layer_and_wrapper(self) -> None:
+        for layer in ("F", "L", "D", "P", "legacy"):
+            for include in ('"susfs.h"', '<susfs.h>', '"../kernel/susfs.h"'):
+                with self.subTest(layer=layer, include=include):
+                    p = self.write(f"#include {include}\n")
+                    violations = lc.check_file(p, {"layer": layer}, ("susfs.h",))
+                    self.assertEqual([v["rule"] for v in violations], ["HEADER_INCLUDE"])
+
+    def test_explicit_headers_and_commented_umbrella_allowed(self) -> None:
+        p = self.write(
+            '#include "susfs_kstat.h"\n#include "sus_path.h"\n'
+            '/* #include "susfs.h" */\n'
+        )
+        self.assertEqual(lc.check_file(p, {"layer": "legacy"}, ("susfs.h",)), [])
+
+    def test_umbrella_rejected_in_inactive_and_alternate_branches(self) -> None:
+        for text in ('#if 0\n#include "susfs.h"\n#endif\n',
+                     '#ifdef CONFIG_COMPAT\n#else\n#include "susfs.h"\n#endif\n'):
+            p = self.write(text)
+            self.assertEqual([v["rule"] for v in lc.check_file(
+                p, {"layer": "legacy"}, ("susfs.h",))], ["HEADER_INCLUDE"])
+
 
 if __name__ == "__main__":
     unittest.main()

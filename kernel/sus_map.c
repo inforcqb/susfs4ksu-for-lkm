@@ -29,11 +29,14 @@
 #include <linux/seq_file.h>
 #include "susfs_abi.h"
 #include "susfs_log.h"
-#include "susfs.h"	/* susfs_abi_path_ok */
+#include "sus_map.h"
+#include "susfs_control.h"
+#include "susfs_helpers.h"
 #include "symbol_resolver.h"	/* find_kernel_symbol_exact, for the walk ops */
 #include "ksu_umount_gate.h"	/* susfs_is_current_proc_umounted_app (issue #34) */
 #include "ksu_allow_gate.h"	/* susfs_control_visible(): the node gate is su's own */
 #include "susfs_kprobe.h"
+#include "susfs_hooks.h"
 #include "patch_memory.h"
 #include "susfs_fp_hook.h"	/* susfs_fp_drain: wait out in-flight wrappers */
 
@@ -54,6 +57,19 @@ static susfs_show_fn_t sus_map_orig_show;
 static susfs_show_fn_t sus_map_orig_smap;
 static bool sus_map_show_armed;
 static bool sus_map_smap_armed;
+
+/* The two seq_operations replacements are registered through the centre; their
+ * op/wrap fields are filled from the resolved table address below. */
+static struct susfs_hook sus_map_show_map_reg = {
+    .owner = "sus_map",
+    .name = "show_map",
+    .target = SUSFS_HOOK_TARGET_SHOW_MAP,
+};
+static struct susfs_hook sus_map_show_smap_reg = {
+    .owner = "sus_map",
+    .name = "show_smap",
+    .target = SUSFS_HOOK_TARGET_SHOW_SMAP,
+};
 
 
 /* Serialises rule PUBLICATION only; the reader stays lock-free: a slot is published by
@@ -632,10 +648,21 @@ static struct kprobe kp_gup_remote = {
     .pre_handler = sus_map_vm_access_pre,
 };
 
-static struct kprobe kp_gup_remote_inner = {
+/* Before v6.2 both wrappers end in __get_user_pages_remote; from v6.2 that
+ * symbol is gone and the exported pin_user_pages_remote is the second landing
+ * pad (process_vm_readv reaches it).  One probe slot, two names, chosen by the
+ * kernel this module is built for. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+static struct kprobe kp_gup_inner = {
+    .symbol_name = "pin_user_pages_remote",
+    .pre_handler = sus_map_vm_access_pre,
+};
+#else
+static struct kprobe kp_gup_inner = {
     .symbol_name = "__get_user_pages_remote",
     .pre_handler = sus_map_vm_access_pre,
 };
+#endif
 
 static int sus_map_vm_access_pre(struct kprobe *kp, struct pt_regs *regs)
 {
@@ -651,7 +678,7 @@ static int sus_map_vm_access_pre(struct kprobe *kp, struct pt_regs *regs)
     if (!mm || !addr)
         return 0;
 
-    atomic_inc(kp == &kp_gup_remote_inner ? &n_gup_inner_calls : &n_gup_calls);
+    atomic_inc(kp == &kp_gup_inner ? &n_gup_inner_calls : &n_gup_calls);
 
     /* both callers hold mmap_read_lock: the *_remote contract of this primitive */
     vma = find_vma(mm, addr);
@@ -790,12 +817,56 @@ static struct kretprobe kr_map_files = {
 };
 static bool kr_map_files_ok;
 
+static const struct susfs_hook_probe map_files_probe = { .kr = &kr_map_files };
+static struct susfs_hook map_files_hook = {
+    .owner = "sus_map", .name = "map_files_get_link",
+    .target = SUSFS_HOOK_TARGET_MAP_FILES_GET_LINK,
+    .probes = &map_files_probe, .nprobes = 1,
+};
+
 /* Kept in one table so init and exit cannot drift apart. */
 static struct kprobe *const map_probes[] = {
     &kp_map, &kp_map_smap, &kp_map_outer, &kp_map_walk, &kp_map_walk_vma,
-    &kp_gup_remote, &kp_gup_remote_inner,
+    &kp_gup_remote, &kp_gup_inner,
 };
 #define N_MAP_PROBES ARRAY_SIZE(map_probes)
+
+static const struct susfs_hook_probe map_hook_probes[] = {
+    { .kp = &kp_map },
+    { .kp = &kp_map_smap },
+    { .kp = &kp_map_outer },
+    { .kp = &kp_map_walk },
+    { .kp = &kp_map_walk_vma },
+    { .kp = &kp_gup_remote },
+    { .kp = &kp_gup_inner },
+};
+
+#define SUS_MAP_HOOK_DEF(idx, tgt, nm) \
+    static struct susfs_hook map_hook_##idx = { \
+        .owner = "sus_map", .name = nm, .target = tgt, \
+        .probes = &map_hook_probes[idx], .nprobes = 1, \
+    }
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+#define SUS_MAP_GUP_INNER_TGT	SUSFS_HOOK_TARGET_PIN_USER_PAGES_REMOTE
+#define SUS_MAP_GUP_INNER_NAME	"pin_user_pages_remote"
+#else
+#define SUS_MAP_GUP_INNER_TGT	SUSFS_HOOK_TARGET_GET_USER_PAGES_REMOTE_INNER
+#define SUS_MAP_GUP_INNER_NAME	"__get_user_pages_remote"
+#endif
+
+SUS_MAP_HOOK_DEF(0, SUSFS_HOOK_TARGET_SHOW_MAP_VMA, "show_map_vma");
+SUS_MAP_HOOK_DEF(1, SUSFS_HOOK_TARGET_SHOW_SMAP, "show_smap");
+SUS_MAP_HOOK_DEF(2, SUSFS_HOOK_TARGET_SHOW_MAP, "show_map");
+SUS_MAP_HOOK_DEF(3, SUSFS_HOOK_TARGET_WALK_PAGE_RANGE, "walk_page_range");
+SUS_MAP_HOOK_DEF(4, SUSFS_HOOK_TARGET_WALK_PAGE_VMA, "walk_page_vma");
+SUS_MAP_HOOK_DEF(5, SUSFS_HOOK_TARGET_GET_USER_PAGES_REMOTE, "get_user_pages_remote");
+SUS_MAP_HOOK_DEF(6, SUS_MAP_GUP_INNER_TGT, SUS_MAP_GUP_INNER_NAME);
+
+static struct susfs_hook *const map_hooks[] = {
+    &map_hook_0, &map_hook_1, &map_hook_2, &map_hook_3,
+    &map_hook_4, &map_hook_5, &map_hook_6,
+};
 static bool map_registered;
 static bool map_probe_armed[N_MAP_PROBES];
 
@@ -862,7 +933,7 @@ static DEFINE_MUTEX(map_ctl_lock);
 static void sus_map_arm_show_wrappers(void)
 {
 	const struct seq_operations *op;
-	susfs_show_fn_t orig, wrap;
+	susfs_show_fn_t orig;
 	unsigned long addr;
 
 	if (!sus_map_show_armed) {
@@ -872,12 +943,12 @@ static void sus_map_arm_show_wrappers(void)
 		} else {
 			op = (const struct seq_operations *)addr;
 			orig = READ_ONCE(op->show);
-			wrap = sus_map_show_map_wrap;
 			sus_map_maps_op = op;
 			sus_map_orig_show = orig;
-			smp_wmb();
-			if (!ksu_patch_text((void *)&op->show, &wrap, sizeof(wrap),
-					    KSU_PATCH_TEXT_FLUSH_DCACHE)) {
+			sus_map_show_map_reg.seq_op = (struct seq_operations *)op;
+			sus_map_show_map_reg.seq_wrap = (void *)sus_map_show_map_wrap;
+			if (!susfs_hook_register_assign(&sus_map_show_map_reg,
+						    SUSFS_HOOK_BACKEND_TABLE)) {
 				sus_map_show_armed = true;
 				SUSFS_LOGI("sus_map: show_map replaced at %px (original %px)\n",
 					   (void *)&op->show, (void *)orig);
@@ -896,12 +967,12 @@ static void sus_map_arm_show_wrappers(void)
 		} else {
 			op = (const struct seq_operations *)addr;
 			orig = READ_ONCE(op->show);
-			wrap = sus_map_show_smap_wrap;
 			sus_map_smaps_op = op;
 			sus_map_orig_smap = orig;
-			smp_wmb();
-			if (!ksu_patch_text((void *)&op->show, &wrap, sizeof(wrap),
-					    KSU_PATCH_TEXT_FLUSH_DCACHE)) {
+			sus_map_show_smap_reg.seq_op = (struct seq_operations *)op;
+			sus_map_show_smap_reg.seq_wrap = (void *)sus_map_show_smap_wrap;
+			if (!susfs_hook_register_assign(&sus_map_show_smap_reg,
+						    SUSFS_HOOK_BACKEND_TABLE)) {
 				sus_map_smap_armed = true;
 				SUSFS_LOGI("sus_map: show_smap replaced at %px (original %px)\n",
 					   (void *)&op->show, (void *)orig);
@@ -938,15 +1009,12 @@ static int sus_map_register_probes(void)
          * sus_map_arm_show_wrappers() above instead. */
         if (map_probes[i] == &kp_map_smap || map_probes[i] == &kp_map_outer)
             continue;
-        rc = register_kprobe(map_probes[i]);
-        if (rc) {
-            pr_warn("sus_map: register_kprobe(%s) failed %d - that listing is not filtered\n",
+        rc = susfs_hook_register(map_hooks[i]);
+        if (rc < 0) {
+            pr_warn("sus_map: hook_register(%s) failed %d - that listing is not filtered\n",
                     map_probes[i]->symbol_name, rc);
-            /* This function is retried from the supercall that adds a rule (and it skips the
-             * probes that did arm), so the struct has to be clear for the retry to reach the
-             * symbol again: a failure after address resolution leaves .addr set - see
-             * susfs_kprobe.h. */
-            susfs_kp_forget_addr(map_probes[i]);
+            /* The centre already clears the resolved address on failure, so the retry
+             * from the supercall can reach the symbol again - see susfs_kprobe.h. */
             if (!first_err)
                 first_err = rc;
             continue;
@@ -962,11 +1030,10 @@ static int sus_map_register_probes(void)
     /* The map_files hook is a kretprobe, so it lives outside map_probes[] (which
      * holds struct kprobe *) and is tracked on its own; optional like the rest. */
     if (!kr_map_files_ok) {
-        int rc = register_kretprobe(&kr_map_files);
+        int rc = susfs_hook_register(&map_files_hook);
 
-        if (rc) {
-            susfs_krp_forget_addr(&kr_map_files);
-            pr_warn("sus_map: register_kretprobe(proc_map_files_get_link) failed %d - readlink on a hidden mapping still names the file\n",
+        if (rc < 0) {
+            pr_warn("sus_map: hook_register(proc_map_files_get_link) failed %d - readlink on a hidden mapping still names the file\n",
                     rc);
         } else {
             kr_map_files_ok = true;
@@ -1200,31 +1267,19 @@ void susfs_sus_map_exit(void)
     for (i = 0; i < (int)N_MAP_PROBES; i++) {
         if (!map_probe_armed[i])
             continue;
-        unregister_kprobe(map_probes[i]);
-        susfs_kp_forget_addr(map_probes[i]);
+        susfs_hook_unregister(map_hooks[i]);
         map_probe_armed[i] = false;
     }
     if (kr_map_files_ok) {
-        unregister_kretprobe(&kr_map_files);
-        susfs_krp_forget_addr(&kr_map_files);
+        susfs_hook_unregister(&map_files_hook);
         kr_map_files_ok = false;
     }
     if (sus_map_show_armed) {
-        susfs_show_fn_t orig = sus_map_orig_show;
-
-        if (!sus_map_maps_op || !orig ||
-            ksu_patch_text((void *)&sus_map_maps_op->show, &orig, sizeof(orig),
-                           KSU_PATCH_TEXT_FLUSH_DCACHE))
-            pr_warn("sus_map: show_map restore failed\n");
+        susfs_hook_unregister(&sus_map_show_map_reg);
         sus_map_show_armed = false;
     }
     if (sus_map_smap_armed) {
-        susfs_show_fn_t orig = sus_map_orig_smap;
-
-        if (!sus_map_smaps_op || !orig ||
-            ksu_patch_text((void *)&sus_map_smaps_op->show, &orig, sizeof(orig),
-                           KSU_PATCH_TEXT_FLUSH_DCACHE))
-            pr_warn("sus_map: show_smap restore failed\n");
+        susfs_hook_unregister(&sus_map_show_smap_reg);
         sus_map_smap_armed = false;
     }
     /* A caller can still be inside a wrapper after its entry is restored: wait

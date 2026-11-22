@@ -9,6 +9,12 @@ on:
       - 'tools/layer_baseline.json'
       - 'tools/layer_allowlist.json'
       - 'tools/layering_check.py'
+      - 'tools/test_layering.py'
+      - 'tools/susfs_avc_view_test.c'
+      - 'tools/susfs_uname_view_test.c'
+      - 'tools/susfs_hide_view_test.c'
+      - 'tools/sus_mount_identity_view_test.c'
+      - 'tools/hk_exec_nx_test.c'
       - '.github/workflows/layering.yml'
   pull_request:
     paths:
@@ -17,6 +23,12 @@ on:
       - 'tools/layer_baseline.json'
       - 'tools/layer_allowlist.json'
       - 'tools/layering_check.py'
+      - 'tools/test_layering.py'
+      - 'tools/susfs_avc_view_test.c'
+      - 'tools/susfs_uname_view_test.c'
+      - 'tools/susfs_hide_view_test.c'
+      - 'tools/sus_mount_identity_view_test.c'
+      - 'tools/hk_exec_nx_test.c'
       - '.github/workflows/layering.yml'
   workflow_dispatch:
 
@@ -44,5 +56,16 @@ jobs:
         run: |
           cc -std=c11 -Wall -Wextra -I kernel tools/susfs_create_view_test.c -o /tmp/test_susfs_create_view
           /tmp/test_susfs_create_view
+      - name: path, open, kstat, avc, uname, hide and mount identity view host tests
+        run: |
+          set -e
+          for test in sus_path_view susfs_open_view susfs_kstat_view susfs_avc_view susfs_uname_view susfs_hide_view sus_mount_identity_view; do
+            cc -std=c11 -Wall -Wextra -Werror -I kernel "tools/${test}_test.c" -o "/tmp/test_${test}"
+            "/tmp/test_${test}"
+          done
       - name: Enforce layering
         run: python tools/layering_check.py --strict
+      - name: ARM64 trampoline NX policy host test
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -I kernel tools/hk_exec_nx_test.c -o /tmp/test_hk_exec_nx
+          /tmp/test_hk_exec_nx

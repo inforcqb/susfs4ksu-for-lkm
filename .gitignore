@@ -44,6 +44,8 @@ art/
 !PROC_INTERFACES.md
 !README.en.md
 !PROC_INTERFACES.en.md
+# The handoff guide is read by coding agents (Codex looks for AGENTS.md at the root).
+!AGENTS.md
 
 # development-only scaffolding: the probe/test modules and C test programs used
 # while working the hooks out.  They are not built by kernel/Makefile and are not

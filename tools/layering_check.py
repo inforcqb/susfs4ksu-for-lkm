@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Report layering violations for the kernel tree.
-
-Phase 0 is deliberately report-only: current code still has known violations.
-`--strict` is for the later phases, once the per-file budget reaches zero.
-"""
+"""Check layer boundaries and explicit feature-header dependencies."""
 
 from __future__ import annotations
 
@@ -23,10 +19,24 @@ RULES = {
         "includes": [
             "linux/namei.h", "linux/path.h", "linux/dcache.h",
             "linux/kprobes.h", "susfs_kprobe.h",
+            "susfs_avc_data.h",
+            "susfs_hide_data.h",
         ],
         "symbols": [
             "vfs_mkdir", "filename_parentat", "lookup_one_qstr_excl",
             "done_path_create", "security_path_mkdir",
+            "susfs_avc_registered", "susfs_avc_exiting", "susfs_avc_ctl_lock",
+            "susfs_avc_su_sid", "susfs_avc_priv_app_sid",
+            "susfs_avc_enter_count", "susfs_avc_hit_count",
+            "susfs_uname_state_values", "susfs_uname_enabled",
+            "susfs_uname_registered", "susfs_uname_inline",
+            "susfs_uname_ctl_lock", "susfs_uname_data_pad",
+            "n_hide_modules", "n_hide_modules_applied", "hide_modules_lock",
+            "hide_modules_pending_val", "hide_modules_pending_given",
+            "hide_syms_param_lock", "hide_syms_ready", "hide_modules_commit",
+            "hide_module_name_match", "hide_hit_count", "hide_enter_count",
+            "hide_layout_bad", "n_modlines_skipped", "n_kallsyms_mod_skipped",
+            "n_sysfs_rules_added", "n_sysfs_rules_failed",
         ],
     },
     "L": {
@@ -174,10 +184,9 @@ def strip_comments_keep_strings(text: str) -> str:
     return "".join(out)
 
 
-def check_file(path: Path, meta: dict) -> list[dict]:
+def check_file(path: Path, meta: dict,
+               forbidden_includes: tuple[str, ...] = ()) -> list[dict]:
     layer = meta.get("layer")
-    if layer not in RULES:
-        return []
     raw = path.read_text(encoding="utf-8", errors="replace")
     active = remove_if0(raw)
     clean = strip_comments_strings(active)
@@ -186,19 +195,27 @@ def check_file(path: Path, meta: dict) -> list[dict]:
     allowed_sym = set(meta.get("allowed_symbols", []))
     out: list[dict] = []
 
+    # A removed umbrella is invalid even in an inactive/alternate branch.
+    # Scan all includes here; layer-specific symbol rules still ignore #if 0.
+    for line in strip_comments_keep_strings(raw).splitlines():
+        m = INCLUDE_RE.match(line)
+        if m and Path(m.group(1).replace("\\", "/")).name in forbidden_includes:
+            out.append({"file": rel_posix(path),
+                        "rule": "HEADER_INCLUDE", "symbol": m.group(1)})
+
     for line in include_text.splitlines():
         m = INCLUDE_RE.match(line)
         if not m:
             continue
         inc = m.group(1)
-        for bad in RULES[layer]["includes"]:
+        for bad in RULES.get(layer, {}).get("includes", []):
             if inc == bad or (bad.endswith("/") and inc.startswith(bad)) or inc.startswith(bad):
                 if inc not in allowed_inc:
                     out.append({"file": rel_posix(path),
                                 "rule": f"{layer}_INCLUDE", "symbol": inc})
                 break
 
-    for sym in RULES[layer]["symbols"]:
+    for sym in RULES.get(layer, {}).get("symbols", []):
         if sym in allowed_sym:
             continue
         if re.search(rf"(?<![A-Za-z0-9_]){re.escape(sym)}(?![A-Za-z0-9_])", clean):
@@ -250,7 +267,8 @@ def main() -> int:
     for rel, meta in manifest.get("files", {}).items():
         p = ROOT / rel
         if p.exists():
-            violations.extend(check_file(p, meta))
+            violations.extend(check_file(
+                p, meta, tuple(manifest.get("header_contract", {}).get("forbidden_includes", []))))
 
     actual = {f"kernel/{p.name}" for p in (ROOT / "kernel").glob("*.[ch]")}
     listed = set(manifest.get("files", {}))

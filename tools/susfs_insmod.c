@@ -64,6 +64,27 @@ typedef unsigned int u32;
 typedef unsigned long long u64;
 typedef long s64;
 
+/* Shared with the kernel map ABI.  The slot list is the same macro the module
+ * includes, so the loader cannot drift from the bit order. */
+#include "../kernel/susfs_hook_slots.h"
+
+enum {
+#define SUSFS_HOOK_ENUM(name, sym)	SUSFS_HOOK_##name,
+	SUSFS_HOOK_SLOTS(SUSFS_HOOK_ENUM)
+#undef SUSFS_HOOK_ENUM
+	SUSFS_HOOK_SLOT_COUNT
+};
+#define SUSFS_HOOK_WORDS	((SUSFS_HOOK_SLOT_COUNT + 31) / 32)
+#define SUSFS_HOOK_MAP_ABI	1u
+#define SUSFS_HOOK_MAP_READY	0x53484650u
+
+struct loader_hook_map {
+	u32 ready;
+	u32 abi;
+	u32 nbits;
+	u32 bits[SUSFS_HOOK_WORDS];
+};
+
 /* The type a syscall number, argument and return value travels in: pointer-sized.
  * On the target it is plain `long`; a host build (SUSFS_INSMOD_HOSTTEST) must also
  * be able to hand a pointer through it, so it is spelled the compiler's way. */
@@ -81,15 +102,44 @@ typedef __INTPTR_TYPE__ sysarg;
 #define SYS_lseek	62
 #define SYS_mmap	222
 #define SYS_init_module	105
+#define SYS_mkdirat	34
+#define SYS_unlinkat	35
+#define SYS_symlinkat	36
+#define SYS_linkat	37
+#define SYS_renameat	38
+#define SYS_umount2	39
+#define SYS_mount	40
+#define SYS_statfs	43
+#define SYS_faccessat	48
+#define SYS_fchmodat	53
+#define SYS_newfstatat	79
+#define SYS_setxattr	5
+#define SYS_getxattr	8
+#define SYS_listxattr	11
+#define SYS_removexattr	14
+#define SYS_readlinkat	78
+#define SYS_unshare	97
+#define SYS_clone	220
+#define SYS_wait4	260
+#define SIGCHLD		17
+#define SYS_uname	160
+#define SYS_getpid	172
+#define SYS_process_vm_readv	270
+#define SYS_statx	291
+#define CLONE_NEWNS	0x00020000
 
 #define AT_FDCWD	(-100)
+#define AT_REMOVEDIR	0x200
 #define O_RDONLY	0
 #define O_WRONLY	1
+#define O_CREAT		0x40
 #define O_NONBLOCK	0x800
+#define O_TRUNC		0x200
 #define SEEK_END	2
 #define PROT_READ	1
 #define PROT_WRITE	2
 #define MAP_PRIVATE	2
+#define MAP_SHARED	1
 
 /* The only host-dependent line in this file: the actual svc on the target, a shim
  * when the ELF/kallsyms/vermagic logic is exercised off-device
@@ -346,6 +396,7 @@ static sysarg find_sub(const char *hay, u64 hlen, const char *needle, u64 nlen)
 #define ELFDATA2LSB	1
 #define EM_AARCH64	183
 
+#define SHT_NOBITS	8
 #define SHT_PROGBITS	1
 #define SHT_SYMTAB	2
 #define SHT_STRTAB	3
@@ -800,12 +851,1156 @@ static int modinfo_lookup(char *base, u64 size, const char *key, char **val, u64
 }
 
 /* -------------------------------------------------------------------------- *
+ * optional pre-load hit probe                                                *
+ * -------------------------------------------------------------------------- *
+ * The loader is a user-space program, so it can drive tracefs before the
+ * module exists.  This is the C equivalent of tools/probe_hits.py: it installs
+ * kprobes on unique kernel symbols, runs a few opens, and reports how many
+ * times each out-of-line entry executed.  It deliberately does not patch the
+ * module yet; -p is the bring-up mode for the bitmap design.
+ */
+
+struct hit_probe {
+	char symbol[40];
+	char event[40];
+	u32 count;
+};
+
+/* Fixed arrays, not pointers into .rodata: this is a freestanding static PIE
+ * with a custom _start, so no startup code applies R_AARCH64_RELATIVE.  A pointer
+ * table here would be an unrelocated link-time address on device. */
+#define PROBE_ROW(name, sym) { #sym, "sp_" #name, 0 },
+static struct hit_probe hit_probes[] = {
+	SUSFS_HOOK_SLOTS(PROBE_ROW)
+};
+#undef PROBE_ROW
+
+static u32 probe_bits[SUSFS_HOOK_WORDS];
+/* One trigger round is enough to answer "did this entry run at all"; 100 rounds
+ * keeps a marginal entry visible without the 1000-round bring-up cost.  -p may
+ * override it: -p N. */
+#define PROBE_ROUNDS_DEFAULT 100
+static u32 probe_rounds = PROBE_ROUNDS_DEFAULT;
+
+/* A pure decimal, bounded so a typo cannot turn into a long probe run.  Returns
+ * 0 for anything that is not one. */
+#define PROBE_SLOT_COUNT (sizeof(hit_probes) / sizeof(hit_probes[0]))
+
+static u32 parse_rounds(const char *s)
+{
+	u32 v = 0;
+
+	if (!*s)
+		return 0;
+	while (*s) {
+		if (*s < '0' || *s > '9')
+			return 0;
+		v = v * 10 + (u32)(*s - '0');
+		if (v > 1000000u)
+			return 0;
+		s++;
+	}
+	return v;
+}
+
+#define TRACE_ROOT "/sys/kernel/tracing/"
+#define TRACE_ALT  "/sys/kernel/debug/tracing/"
+
+static sysarg xopen(const char *path, int flags)
+{
+	return sys6(SYS_openat, AT_FDCWD, (sysarg)path, flags, 0, 0, 0);
+}
+
+static int xwrite_all(sysarg fd, const char *s, u64 n)
+{
+	u64 off = 0;
+
+	while (off < n) {
+		sysarg r = sys6(SYS_write, fd, (sysarg)(s + off), (sysarg)(n - off), 0, 0, 0);
+
+		if (r <= 0)
+			return -1;
+		off += (u64)r;
+	}
+	return 0;
+}
+
+
+static int write_path(const char *path, const char *s)
+{
+	sysarg fd = xopen(path, O_WRONLY);
+	int ret;
+
+	if (fd < 0)
+		return -1;
+	ret = xwrite_all(fd, s, s_len(s));
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+	return ret;
+}
+
+static int clear_path(const char *path)
+{
+	sysarg fd = xopen(path, O_WRONLY | O_TRUNC);
+
+	if (fd < 0)
+		return -1;
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+	return 0;
+}
+
+static u64 count_sub(const char *hay, u64 hlen, const char *needle, u64 nlen)
+{
+	u64 i, n = 0;
+
+	for (i = 0; i + nlen <= hlen; i++)
+		if (s_eq_n(hay + i, needle, nlen))
+			n++;
+	return n;
+}
+
+static int probe_root(char *root, u64 cap)
+{
+	const char *p = TRACE_ROOT;
+	u64 n = s_len(p);
+
+	if (n + 1 > cap)
+		return -1;
+	copy_n(root, p, n + 1);
+	{
+		sysarg fd = xopen(TRACE_ROOT "kprobe_events", O_RDONLY);
+
+		if (fd >= 0) {
+			sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+			return 0;
+		}
+	}
+	n = s_len(TRACE_ALT);
+	if (n + 1 > cap)
+		return -1;
+	copy_n(root, TRACE_ALT, n + 1);
+	{
+		sysarg fd = xopen(TRACE_ALT "kprobe_events", O_RDONLY);
+
+		if (fd >= 0) {
+			sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+			return 0;
+		}
+	}
+	return -1;
+}
+
+static void probe_path(char *dst, u64 cap, const char *root, const char *tail)
+{
+	u64 n = 0, i;
+
+	for (i = 0; root[i] && n + 1 < cap; i++)
+		dst[n++] = root[i];
+	for (i = 0; tail[i] && n + 1 < cap; i++)
+		dst[n++] = tail[i];
+	dst[n] = 0;
+}
+
+static void event_path(char *dst, u64 cap, const char *root, const char *event,
+		       const char *tail)
+{
+	u64 n = 0, i;
+
+	for (i = 0; root[i] && n + 1 < cap; i++) dst[n++] = root[i];
+	for (i = 0; "events/kprobes/"[i] && n + 1 < cap; i++)
+		dst[n++] = "events/kprobes/"[i];
+	for (i = 0; event[i] && n + 1 < cap; i++) dst[n++] = event[i];
+	for (i = 0; tail[i] && n + 1 < cap; i++) dst[n++] = tail[i];
+	dst[n] = 0;
+}
+
+static int probe_prepare(struct hit_probe *p, const char *root)
+{
+	char path[256], cmd[128];
+	u64 n = 0, i;
+
+	probe_path(path, sizeof(path), root, "kprobe_events");
+	/* remove a stale event, ignoring failure */
+	n = 0;
+	cmd[n++] = '-'; cmd[n++] = ':';
+	for (i = 0; p->event[i]; i++) cmd[n++] = p->event[i];
+	cmd[n++] = '\n'; cmd[n] = 0;
+	(void)write_path(path, cmd);
+
+	n = 0;
+	cmd[n++] = 'p'; cmd[n++] = ':';
+	for (i = 0; p->event[i]; i++) cmd[n++] = p->event[i];
+	cmd[n++] = ' ';
+	for (i = 0; p->symbol[i]; i++) cmd[n++] = p->symbol[i];
+	cmd[n++] = '\n'; cmd[n] = 0;
+	if (write_path(path, cmd))
+		return -1;
+
+	event_path(path, sizeof(path), root, p->event, "/enable");
+	return write_path(path, "1\n");
+}
+
+static void probe_finish(struct hit_probe *p, const char *root)
+{
+	char path[256], cmd[128];
+	u64 n = 0, i;
+
+	event_path(path, sizeof(path), root, p->event, "/enable");
+	(void)write_path(path, "0\n");
+
+	probe_path(path, sizeof(path), root, "kprobe_events");
+	n = 0;
+	cmd[n++] = '-'; cmd[n++] = ':';
+	for (i = 0; p->event[i]; i++) cmd[n++] = p->event[i];
+	cmd[n++] = '\n'; cmd[n] = 0;
+	(void)write_path(path, cmd);
+}
+
+static char trigger_buf[8192];
+static char map_buf[4096];
+
+static void trigger_read_into(const char *path, char *buf, u64 cap)
+{
+	sysarg fd = xopen(path, O_RDONLY);
+	u64 off = 0;
+
+	if (fd < 0)
+		return;
+	while (off < cap) {
+		sysarg r = sys6(SYS_read, fd, (sysarg)(buf + off),
+				(sysarg)(cap - off), 0, 0, 0);
+		if (r <= 0)
+			break;
+		off += (u64)r;
+	}
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+}
+
+static void trigger_read(const char *path)
+{
+	trigger_read_into(path, trigger_buf, sizeof(trigger_buf));
+}
+
+static void trigger_write(const char *path, const char *s)
+{
+	sysarg fd = xopen(path, O_WRONLY);
+
+	if (fd < 0)
+		return;
+	(void)xwrite_all(fd, s, s_len(s));
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+}
+
+static void trigger_readlink(const char *path)
+{
+	char buf[256];
+
+	sys6(SYS_readlinkat, AT_FDCWD, (sysarg)path, (sysarg)buf,
+	     (sysarg)(sizeof(buf) - 1), 0, 0);
+}
+
+static void trigger_uname(void)
+{
+	char uts[390];	/* struct new_utsname: 6 * 65, rounded */
+
+	sys6(SYS_uname, (sysarg)uts, 0, 0, 0, 0, 0);
+}
+
+static void trigger_statx(void)
+{
+	char stx[256];	/* struct statx */
+
+	sys6(SYS_statx, AT_FDCWD, (sysarg)"/system", 0, 0x7ff,
+	     (sysarg)stx, 0);
+}
+
+static void trigger_statfs(void)
+{
+	char st[128];	/* struct statfs */
+
+	sys6(SYS_statfs, (sysarg)"/system", (sysarg)st, 0, 0, 0, 0);
+}
+
+static void trigger_process_vm(void)
+{
+	struct trigger_iov {
+		void *base;
+		u64 len;
+	} local, remote;
+	char page[16];
+	sysarg pid = sys6(SYS_getpid, 0, 0, 0, 0, 0, 0);
+
+	local.base = page;
+	local.len = sizeof(page);
+	remote.base = page;
+	remote.len = sizeof(page);
+	sys6(SYS_process_vm_readv, pid, (sysarg)&local, 1,
+	     (sysarg)&remote, 1, 0);
+}
+
+static void trigger_map_files(void)
+{
+	char path[128];
+	u64 n = 0, i;
+	const char prefix[] = "/proc/self/map_files/";
+
+	trigger_read_into("/proc/self/maps", map_buf, sizeof(map_buf));
+	if (!map_buf[0])
+		return;
+	while (n + 1 < sizeof(path) && prefix[n])
+		path[n] = prefix[n], n++;
+	for (i = 0; map_buf[i] && map_buf[i] != '-' &&
+		    map_buf[i] != ' ' && map_buf[i] != '\n'; i++) {
+		if (n + 1 < sizeof(path))
+			path[n++] = map_buf[i];
+	}
+	if (!i || n + 1 >= sizeof(path) || map_buf[i] != '-')
+		return;
+	path[n++] = '-';
+	i++;
+	for (; map_buf[i] && map_buf[i] != '-' && map_buf[i] != ' ' &&
+	       map_buf[i] != '\n'; i++) {
+		if (n + 1 < sizeof(path))
+			path[n++] = map_buf[i];
+	}
+	path[n] = 0;
+	trigger_readlink(path);
+}
+
+static int trigger_unshare(void);
+static void trigger_mount(void);
+
+static void trigger_open(const char *path)
+{
+	sysarg fd = xopen(path, O_RDONLY);
+
+	if (fd >= 0)
+		sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+}
+
+/* sus_path VFS slots: stat -> vfs_getattr, faccessat -> inode_permission, the
+ * xattr family -> vfs_*xattr, chmod -> notify_change, link/rename/unlink/rmdir
+ * -> their vfs_* entry, readlink -> vfs_readlink.  Everything is rooted under
+ * /data/local/tmp; an operation the filesystem or SELinux refuses still passes
+ * the VFS entry the probe counts. */
+#define PROBE_VFS_DIR	"/data/local/tmp/.susfs_probe_dir"
+#define PROBE_VFS_FILE	"/data/local/tmp/.susfs_probe_dir/f"
+#define PROBE_VFS_FILE2	"/data/local/tmp/.susfs_probe_dir/f2"
+#define PROBE_VFS_LINK	"/data/local/tmp/.susfs_probe_dir/l"
+
+static void trigger_stat_path(const char *path)
+{
+	char st[256];	/* struct stat, 128 bytes on arm64 */
+
+	sys6(SYS_newfstatat, AT_FDCWD, (sysarg)path, (sysarg)st, 0, 0, 0);
+}
+
+static void trigger_access_path(const char *path)
+{
+	sys6(SYS_faccessat, AT_FDCWD, (sysarg)path, 4 /* R_OK */, 0, 0, 0);
+}
+
+static void trigger_mkdir_path(const char *path)
+{
+	sys6(SYS_mkdirat, AT_FDCWD, (sysarg)path, 0700, 0, 0, 0);
+}
+
+static void trigger_unlink_path(const char *path, int flags)
+{
+	sys6(SYS_unlinkat, AT_FDCWD, (sysarg)path, flags, 0, 0, 0);
+}
+
+static void trigger_xattr_suite(const char *path)
+{
+	static const char name[] = "user.susfs_probe";
+	char val[4] = "v";
+	char out[64];
+
+	sys6(SYS_setxattr, (sysarg)path, (sysarg)name, (sysarg)val, 1, 0, 0);
+	sys6(SYS_getxattr, (sysarg)path, (sysarg)name, (sysarg)out,
+	     (sysarg)sizeof(out), 0, 0);
+	sys6(SYS_listxattr, (sysarg)path, (sysarg)out, (sysarg)sizeof(out), 0, 0, 0);
+	sys6(SYS_removexattr, (sysarg)path, (sysarg)name, 0, 0, 0, 0);
+}
+
+/* One pass: creates the tree, exercises every write-side entry, then removes it
+ * again.  Part of the repeated cheap loop, so every VFS slot gets the same
+ * 1000-round floor as the read-side triggers. */
+static void probe_trigger_vfs(void)
+{
+	sysarg fd;
+
+	trigger_mkdir_path(PROBE_VFS_DIR);
+	fd = sys6(SYS_openat, AT_FDCWD, (sysarg)PROBE_VFS_FILE,
+		  O_WRONLY | O_CREAT | O_TRUNC, 0600, 0, 0);
+	if (fd >= 0)
+		sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+
+	trigger_stat_path(PROBE_VFS_FILE);
+	trigger_access_path(PROBE_VFS_FILE);
+	trigger_xattr_suite(PROBE_VFS_FILE);
+
+	/* notify_change: chmod on the temp file, never on a system path. */
+	sys6(SYS_fchmodat, AT_FDCWD, (sysarg)PROBE_VFS_FILE, 0600, 0, 0, 0);
+
+	sys6(SYS_symlinkat, (sysarg)PROBE_VFS_FILE, AT_FDCWD,
+	     (sysarg)PROBE_VFS_LINK, 0, 0, 0);
+	trigger_readlink(PROBE_VFS_LINK);
+	trigger_unlink_path(PROBE_VFS_LINK, 0);
+
+	sys6(SYS_linkat, AT_FDCWD, (sysarg)PROBE_VFS_FILE, AT_FDCWD,
+	     (sysarg)PROBE_VFS_FILE2, 0, 0);
+	sys6(SYS_renameat, AT_FDCWD, (sysarg)PROBE_VFS_FILE2, AT_FDCWD,
+	     (sysarg)PROBE_VFS_LINK, 0, 0);
+	trigger_unlink_path(PROBE_VFS_LINK, 0);
+
+	trigger_unlink_path(PROBE_VFS_FILE, 0);
+	trigger_unlink_path(PROBE_VFS_DIR, AT_REMOVEDIR);
+}
+
+static void probe_trigger_cheap(void)
+{
+	/* open family: vfs_open, path_openat, d_path */
+	trigger_open("/system/build.prop");
+	trigger_open("/proc/version");
+	trigger_open("/system");
+
+	/* seq/proc family: show_map_vma, show_smap, show_map, show_vfs* */
+	trigger_read("/proc/self/maps");
+	trigger_read("/proc/self/smaps");
+	trigger_read("/proc/self/numa_maps");
+	trigger_read("/proc/self/mountinfo");
+	trigger_read("/proc/self/mounts");
+	trigger_read("/proc/self/mountstats");
+	trigger_read("/proc/self/pagemap");
+	trigger_write("/proc/self/clear_refs", "1\n");
+
+	/* syscall family: uname, statx, statfs, readlink, gup */
+	trigger_uname();
+	trigger_statx();
+	trigger_statfs();
+	trigger_readlink("/proc/self/fd/0");
+	trigger_readlink("/proc/self/exe");
+	trigger_process_vm();
+	trigger_map_files();
+
+	/* sus_path VFS: vfs_getattr, inode_permission */
+	trigger_stat_path("/system/build.prop");
+	trigger_access_path("/system/build.prop");
+	probe_trigger_vfs();
+}
+
+static int trigger_unshare(void)
+{
+	sysarg r = sys6(SYS_unshare, CLONE_NEWNS, 0, 0, 0, 0, 0);
+
+	return r == 0 ? 0 : -1;
+}
+
+static void trigger_mount(void)
+{
+	const char mnt[] = "/data/local/tmp/.susfs_probe_mnt";
+
+	sys6(SYS_mkdirat, AT_FDCWD, (sysarg)mnt, 0700, 0, 0, 0);
+	(void)sys6(SYS_mount, (sysarg)"none", (sysarg)mnt, (sysarg)"tmpfs",
+		   0, (sysarg)"size=4k", 0);
+	(void)sys6(SYS_umount2, (sysarg)mnt, 2, 0, 0, 0, 0);
+	(void)sys6(SYS_unlinkat, AT_FDCWD, (sysarg)mnt, 0, 0, 0, 0);
+}
+
+static void probe_trigger_ns(void)
+{
+	if (!trigger_unshare())
+		trigger_mount();
+}
+
+static int count_trace(const char *root)
+{
+	char path[256], needle[64];
+	static char trace[65536];
+	u64 total = 0, i, n;
+	sysarg fd;
+
+	probe_path(path, sizeof(path), root, "trace");
+	fd = xopen(path, O_RDONLY);
+	if (fd < 0)
+		return -1;
+	while (total < sizeof(trace)) {
+		sysarg r = sys6(SYS_read, fd, (sysarg)(trace + total),
+				(sysarg)(sizeof(trace) - total), 0, 0, 0);
+		if (r <= 0)
+			break;
+		total += (u64)r;
+	}
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+
+	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++) {
+		n = 0;
+		for (u64 j = 0; hit_probes[i].event[j]; j++)
+			needle[n++] = hit_probes[i].event[j];
+		needle[n++] = ':'; needle[n] = 0;
+		hit_probes[i].count += (u32)count_sub(trace, total, needle, n);
+	}
+	return 0;
+}
+
+/* ---- SHA-256 (freestanding: no libc) ------------------------------------
+ * The probe cache is bound to one device + one kernel build; the digest over
+ * the whole file is what tells "this cache is intact" from "this file was
+ * edited by hand". */
+struct sha256_ctx {
+	u32 h[8];
+	u64 len;
+	u8 buf[64];
+	u32 n;
+};
+
+static const u32 sha256_k[64] = {
+	0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+	0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+	0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+	0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+	0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+	0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+	0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+	0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+	0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+	0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+	0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+};
+
+#define ROR32(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
+
+static void sha256_block(struct sha256_ctx *c, const u8 *p)
+{
+	u32 w[64], a, b, d, e, f, g, h, t1, t2, cc;
+	u32 i;
+
+	for (i = 0; i < 16; i++)
+		w[i] = ((u32)p[i * 4] << 24) | ((u32)p[i * 4 + 1] << 16) |
+		       ((u32)p[i * 4 + 2] << 8) | (u32)p[i * 4 + 3];
+	for (i = 16; i < 64; i++) {
+		u32 s0 = ROR32(w[i - 15], 7) ^ ROR32(w[i - 15], 18) ^
+			 (w[i - 15] >> 3);
+		u32 s1 = ROR32(w[i - 2], 17) ^ ROR32(w[i - 2], 19) ^
+			 (w[i - 2] >> 10);
+
+		w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+	}
+	a = c->h[0]; b = c->h[1]; cc = c->h[2]; d = c->h[3];
+	e = c->h[4]; f = c->h[5]; g = c->h[6]; h = c->h[7];
+	for (i = 0; i < 64; i++) {
+		u32 s1 = ROR32(e, 6) ^ ROR32(e, 11) ^ ROR32(e, 25);
+		u32 ch = (e & f) ^ (~e & g);
+		u32 s0 = ROR32(a, 2) ^ ROR32(a, 13) ^ ROR32(a, 22);
+		u32 mj = (a & b) ^ (a & cc) ^ (b & cc);
+
+		t1 = h + s1 + ch + sha256_k[i] + w[i];
+		t2 = s0 + mj;
+		h = g; g = f; f = e; e = d + t1;
+		d = cc; cc = b; b = a; a = t1 + t2;
+	}
+	c->h[0] += a; c->h[1] += b; c->h[2] += cc; c->h[3] += d;
+	c->h[4] += e; c->h[5] += f; c->h[6] += g; c->h[7] += h;
+}
+
+static void sha256_init(struct sha256_ctx *c)
+{
+	c->h[0] = 0x6a09e667; c->h[1] = 0xbb67ae85;
+	c->h[2] = 0x3c6ef372; c->h[3] = 0xa54ff53a;
+	c->h[4] = 0x510e527f; c->h[5] = 0x9b05688c;
+	c->h[6] = 0x1f83d9ab; c->h[7] = 0x5be0cd19;
+	c->len = 0;
+	c->n = 0;
+}
+
+static void sha256_update(struct sha256_ctx *c, const void *data, u64 len)
+{
+	const u8 *p = data;
+
+	c->len += len;
+	while (len--) {
+		c->buf[c->n++] = *p++;
+		if (c->n == 64) {
+			sha256_block(c, c->buf);
+			c->n = 0;
+		}
+	}
+}
+
+static void sha256_final(struct sha256_ctx *c, u8 out[32])
+{
+	u64 bits = c->len * 8;
+	u8 pad = 0x80;
+	u8 zero = 0;
+	u32 i;
+
+	sha256_update(c, &pad, 1);
+	while (c->n != 56)
+		sha256_update(c, &zero, 1);
+	for (i = 0; i < 8; i++) {
+		u8 b = (u8)(bits >> (56 - i * 8));
+
+		sha256_update(c, &b, 1);
+	}
+	for (i = 0; i < 8; i++) {
+		out[i * 4] = (u8)(c->h[i] >> 24);
+		out[i * 4 + 1] = (u8)(c->h[i] >> 16);
+		out[i * 4 + 2] = (u8)(c->h[i] >> 8);
+		out[i * 4 + 3] = (u8)c->h[i];
+	}
+}
+
+/* ---- probe cache ---------------------------------------------------------
+ * The map is bound to one device + one kernel build, so a valid cache is
+ * reused instead of probing again: the file carries the kernel release and a
+ * SHA-256 over itself.  A missing file, a format error, a bad digest or a
+ * different release all mean "probe again and overwrite". */
+#define PROBE_CACHE_PATH "/data/adb/susfs_probe_map"
+#define PROBE_MAP_VERSION 1
+
+struct probe_map_file {
+	char magic[8];
+	u32 version;
+	u32 words;
+	u32 kver_len;
+	u32 reserved;
+	char kver[64];
+	u32 bits[SUSFS_HOOK_WORDS];
+	u8 sha[32];
+};
+
+static int str_eq(const char *a, const char *b)
+{
+	u64 n = 0;
+
+	while (a[n] && a[n] == b[n])
+		n++;
+	return a[n] == b[n];
+}
+
+/* struct new_utsname: sysname[65], nodename[65], release[65], version[65],
+ * machine[65], domainname[65]; release starts at offset 130. */
+static int probe_kver(char *out, u64 cap)
+{
+	char uts[390];
+	u64 i;
+
+	if (sys6(SYS_uname, (sysarg)uts, 0, 0, 0, 0, 0) < 0)
+		return -1;
+	for (i = 0; i + 1 < cap && i < 64 && uts[130 + i]; i++)
+		out[i] = uts[130 + i];
+	out[i] = 0;
+	return 0;
+}
+
+/* @verify_sha = 0 is the user-supplied -P map: format-checked only. */
+static int probe_map_load(const char *path, u32 *bits, char *kver,
+			  u64 kver_cap, int verify_sha)
+{
+	struct probe_map_file m;
+	static const char magic[8] = { 'S', 'U', 'S', 'F', 'S', 'M', 'A', 'P' };
+	sysarg fd, r;
+	u64 got = 0, i;
+
+	fd = xopen(path, O_RDONLY);
+	if (fd < 0)
+		return -1;
+	while (got < sizeof(m)) {
+		r = sys6(SYS_read, fd, (sysarg)((u8 *)&m + got),
+			 (sysarg)(sizeof(m) - got), 0, 0, 0);
+		if (r <= 0)
+			break;
+		got += (u64)r;
+	}
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+	if (got != sizeof(m))
+		return -1;
+	for (i = 0; i < 8; i++)
+		if (m.magic[i] != magic[i])
+			return -1;
+	if (m.version != PROBE_MAP_VERSION || m.words != SUSFS_HOOK_WORDS ||
+	    m.kver_len > 64)
+		return -1;
+	if (verify_sha) {
+		struct sha256_ctx c;
+		u8 d[32];
+
+		sha256_init(&c);
+		sha256_update(&c, &m, sizeof(m) - 32);
+		sha256_final(&c, d);
+		for (i = 0; i < 32; i++)
+			if (d[i] != m.sha[i])
+				return -1;
+	}
+	for (i = 0; i < SUSFS_HOOK_WORDS; i++)
+		bits[i] = m.bits[i];
+	if (kver && kver_cap) {
+		for (i = 0; i + 1 < kver_cap && i < 64 && m.kver[i]; i++)
+			kver[i] = m.kver[i];
+		kver[i] = 0;
+	}
+	return 0;
+}
+
+/* @with_sha = 0 leaves the digest zero: that is the ZIP-side map, sealed
+ * later by the install step (-P without a path). */
+static int probe_map_store(const char *path, const u32 *bits, const char *kver,
+			   int with_sha)
+{
+	struct probe_map_file m;
+	struct sha256_ctx c;
+	static const char magic[8] = { 'S', 'U', 'S', 'F', 'S', 'M', 'A', 'P' };
+	u8 d[32];
+	u64 i, n = 0;
+	sysarg fd;
+
+	for (i = 0; i < sizeof(m); i++)
+		((u8 *)&m)[i] = 0;
+	for (i = 0; i < 8; i++)
+		m.magic[i] = magic[i];
+	m.version = PROBE_MAP_VERSION;
+	m.words = SUSFS_HOOK_WORDS;
+	while (kver[n] && n < 64) {
+		m.kver[n] = kver[n];
+		n++;
+	}
+	m.kver_len = (u32)n;
+	for (i = 0; i < SUSFS_HOOK_WORDS; i++)
+		m.bits[i] = bits[i];
+	sha256_init(&c);
+	sha256_update(&c, &m, sizeof(m) - 32);
+	sha256_final(&c, d);
+	if (with_sha) {
+		for (i = 0; i < 32; i++)
+			m.sha[i] = d[i];
+	}
+	fd = sys6(SYS_openat, AT_FDCWD, (sysarg)path,
+		  O_WRONLY | O_CREAT | O_TRUNC, 0644, 0, 0);
+	if (fd < 0)
+		return -1;
+	n = 0;
+	while (n < sizeof(m)) {
+		sysarg w = sys6(SYS_write, fd, (sysarg)((u8 *)&m + n),
+				(sysarg)(sizeof(m) - n), 0, 0, 0);
+
+		if (w <= 0)
+			break;
+		n += (u64)w;
+	}
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+	return n == sizeof(m) ? 0 : -1;
+}
+
+/* Same as count_trace(), for a tracefs instance path.  A whole parallel run is
+ * larger than one chunk, so read until EOF and parse each chunk for every slot
+ * (one read serves all slots, not one read per slot). */
+static int count_trace_path(const char *trace_path)
+{
+	char needle[64];
+	static char trace[65536];
+	u64 i, n, j;
+	sysarg fd;
+
+	fd = xopen(trace_path, O_RDONLY);
+	if (fd < 0)
+		return -1;
+	for (;;) {
+		sysarg r = sys6(SYS_read, fd, (sysarg)trace, sizeof(trace),
+				0, 0, 0);
+
+		if (r <= 0)
+			break;
+		for (i = 0; i < PROBE_SLOT_COUNT; i++) {
+			n = 0;
+			for (j = 0; hit_probes[i].event[j]; j++)
+				needle[n++] = hit_probes[i].event[j];
+			needle[n++] = ':';
+			needle[n] = 0;
+			hit_probes[i].count +=
+				(u32)count_sub(trace, (u64)r, needle, n);
+		}
+	}
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+	return 0;
+}
+
+#define PROBE_MAX_THREADS 12
+#define PROBE_THREAD_STACK 16384
+
+static u32 probe_threads = 1;	/* -t; 1 = single-threaded */
+static u32 probe_worker_rounds = 1;	/* per-worker trigger rounds */
+
+static u8 probe_thread_stacks[PROBE_MAX_THREADS][PROBE_THREAD_STACK]
+	__attribute__((aligned(16)));
+static volatile u32 probe_threads_done;
+static const char *probe_thread_root;
+
+/* clone(CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD): the child
+ * starts on the new stack, i.e. its own C locals would be uninitialised stack,
+ * so the entry is reached from this naked trampoline through x5 and ends with
+ * exit(); the parent returns the clone result.  x5 survives the syscall (only
+ * x0 carries the result). */
+#if defined(__aarch64__)
+static long __attribute__((naked))
+probe_thread_start(void *stack_top, void (*entry)(void))
+{
+	__asm__ volatile(
+		"mov x5, x1\n"
+		"mov x1, x0\n"
+		"mov x0, #0x0f00\n"		/* VM|FS|FILES|SIGHAND */
+		"movk x0, #0x1, lsl #16\n"	/* ...|THREAD = 0x10f00 */
+		"mov x2, xzr\n"
+		"mov x3, xzr\n"
+		"mov x4, xzr\n"
+		"mov x8, #220\n"		/* __NR_clone */
+		"svc #0\n"
+		"cbnz x0, 1f\n"			/* parent: return the tid */
+		"mov x29, xzr\n"
+		"mov x30, xzr\n"
+		"blr x5\n"			/* child: run the entry on its stack */
+		"mov x0, xzr\n"
+		"mov x8, #93\n"			/* __NR_exit: end this thread */
+		"svc #0\n"
+		"1: ret\n");
+}
+#else	/* host test build (tools/insmod_match_test.c includes this file) */
+static long probe_thread_start(void *stack_top, void (*entry)(void))
+{
+	(void)stack_top;
+	(void)entry;
+	return -1;	/* no threads on the host build */
+}
+#endif
+
+static void probe_worker(const char *root, u32 wid);
+
+/* The thread's own stack identifies its slot range: clone() gives it that stack
+ * and nothing else distinguishes the workers. */
+#if defined(__aarch64__)
+static u32 probe_current_wid(void)
+{
+	unsigned long sp;
+	u32 i;
+
+	__asm__ volatile("mov %0, sp" : "=r"(sp));
+	for (i = 0; i < PROBE_MAX_THREADS; i++) {
+		unsigned long lo = (unsigned long)&probe_thread_stacks[i][0];
+		unsigned long hi = (unsigned long)&probe_thread_stacks[i][PROBE_THREAD_STACK];
+
+		if (sp > lo && sp <= hi)
+			return i;
+	}
+	return 0;
+}
+#else	/* host test build: no threads, no stack to identify */
+static u32 probe_current_wid(void)
+{
+	return 0;
+}
+#endif
+
+static void probe_thread_entry(void)
+{
+	u32 wid = probe_current_wid();
+
+	probe_worker(probe_thread_root, wid);
+	__sync_fetch_and_add(&probe_threads_done, 1);
+	sys6(SYS_exit, 0, 0, 0, 0, 0, 0);
+	for (;;)
+		;
+}
+
+/* instances/pw<wid>/<leaf>; leaf "" gives the instance directory itself. */
+static void probe_inst_path(char *dst, u64 cap, const char *root, u32 wid,
+			    const char *leaf)
+{
+	char num[8];
+	u64 n = 0, k = 0, i;
+	u32 v = wid;
+	const char *p;
+
+	if (v == 0) {
+		num[n++] = '0';
+	} else {
+		char tmp[8];
+		u64 t = 0;
+
+		while (v) {
+			tmp[t++] = (char)('0' + v % 10);
+			v /= 10;
+		}
+		for (i = 0; i < t; i++)
+			num[n++] = tmp[t - 1 - i];
+	}
+	while (*root && k + 1 < cap)
+		dst[k++] = *root++;
+	p = "instances/pw";
+	while (*p && k + 1 < cap)
+		dst[k++] = *p++;
+	for (i = 0; i < n && k + 1 < cap; i++)
+		dst[k++] = num[i];
+	if (k + 1 < cap)
+		dst[k++] = '/';
+	while (*leaf && k + 1 < cap)
+		dst[k++] = *leaf++;
+	if (k < cap)
+		dst[k] = 0;
+}
+
+/* instances/pwN/events/kprobes/<event>/enable */
+static void probe_inst_event(char *dst, u64 cap, const char *root, u32 wid,
+			     const char *event)
+{
+	u64 k, i;
+	const char *p = "/enable";
+
+	probe_inst_path(dst, cap, root, wid, "events/kprobes/");
+	for (k = 0; dst[k] && k + 1 < cap; k++)
+		;
+	for (i = 0; event[i] && k + 1 < cap; i++)
+		dst[k++] = event[i];
+	for (i = 0; p[i] && k + 1 < cap; i++)
+		dst[k++] = p[i];
+	if (k < cap)
+		dst[k] = 0;
+}
+
+/* One read buffer per worker: the workers read different instances at the
+ * same time, so a shared static buffer would race with itself. */
+
+/* Each worker owns one tracefs instance (instances/pwN) with its own trace
+ * buffer and tracing_on, so there is no global lock: workers trigger and read
+ * their own instance in parallel.  The kprobe events are registered once in the
+ * global kprobe_events; the instance enables the events of its slot range. */
+/* A worker only triggers: every instance enables every slot's event, all
+ * instances have tracing_on=1, so each worker's hits land in all instances and
+ * the parent reads instance 0 once after the join (that buffer already covers
+ * every trigger).  That is the "attach them all, trigger once" shape, made
+ * parallel over the trigger rounds. */
+static void probe_worker(const char *root, u32 wid)
+{
+	u32 r;
+
+	(void)root;
+	(void)wid;
+	for (r = 0; r < probe_worker_rounds; r++)
+		probe_trigger_cheap();
+}
+
+static int probe_hits(void)
+{
+	char root[128], path[256];
+	u64 i, armed = 0;
+	int rc = -1;
+
+	if (probe_root(root, sizeof(root))) {
+		o_put(P "probe: tracefs is not mounted; fallback stays the default\n");
+		return -1;
+	}
+	o_put(P "probe: rounds=");
+	o_dec(probe_rounds);
+	o_put(" threads=");
+	o_dec(probe_threads);
+	o_put("\n");
+	probe_path(path, sizeof(path), root, "tracing_on");
+	(void)write_path(path, "0\n");
+	probe_path(path, sizeof(path), root, "trace");
+	(void)clear_path(path);
+
+	/* A slot that cannot be armed is not a probe failure: its bit simply stays 0
+	 * while the other slots are still measured.  Only when nothing at all could be
+	 * armed is the whole map dropped (fallback). */
+	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++) {
+		if (probe_prepare(&hit_probes[i], root)) {
+			o_put(P "probe: cannot install ");
+			o_put(hit_probes[i].symbol);
+			o_put("; slot stays 0\n");
+			continue;
+		}
+		armed++;
+	}
+	if (!armed) {
+		o_put(P "probe: no slot could be armed; fallback stays the default\n");
+		goto out;
+	}
+
+	if (probe_threads > 1) {
+		u32 i, started = 0, idx;
+		char ep[320];
+
+		/* Attach them all, trigger in parallel: every instance enables
+		 * every slot's event and keeps tracing_on for the whole phase, so
+		 * every worker's hits land in all instances; one read of
+		 * instance 0 afterwards covers the whole run. */
+		probe_worker_rounds = probe_rounds / probe_threads;
+		if (!probe_worker_rounds)
+			probe_worker_rounds = 1;
+		probe_thread_root = root;
+		probe_threads_done = 0;
+		for (i = 0; i < probe_threads && i < PROBE_MAX_THREADS; i++) {
+			probe_inst_path(path, sizeof(path), root, i, "");
+			(void)sys6(SYS_unlinkat, AT_FDCWD, (sysarg)path,
+				   AT_REMOVEDIR, 0, 0, 0);
+			(void)sys6(SYS_mkdirat, AT_FDCWD, (sysarg)path, 0755,
+				   0, 0, 0);
+			probe_inst_path(path, sizeof(path), root, i, "trace");
+			(void)clear_path(path);
+			for (idx = 0; idx < PROBE_SLOT_COUNT; idx++) {
+				probe_inst_event(ep, sizeof(ep), root, i,
+						 hit_probes[idx].event);
+				(void)write_path(ep, "1\n");
+			}
+			probe_inst_path(path, sizeof(path), root, i, "tracing_on");
+			(void)write_path(path, "1\n");
+		}
+		for (i = 1; i < probe_threads; i++) {
+			if (probe_thread_start(&probe_thread_stacks[i][PROBE_THREAD_STACK],
+					       probe_thread_entry) < 0)
+				break;
+			started++;
+		}
+		probe_worker(root, 0);
+		while (probe_threads_done < started)
+			__sync_synchronize();
+		for (i = 0; i < probe_threads && i < PROBE_MAX_THREADS; i++) {
+			probe_inst_path(path, sizeof(path), root, i, "tracing_on");
+			(void)write_path(path, "0\n");
+		}
+		/* Every instance holds the same triggers; read instance 0 once
+		 * (one read serves every slot, not one read per slot). */
+		probe_inst_path(path, sizeof(path), root, 0, "trace");
+		(void)count_trace_path(path);
+		o_put(P "probe: trigger threads=");
+		o_dec(started + 1);
+		o_put("\n");
+		for (i = 0; i < probe_threads && i < PROBE_MAX_THREADS; i++) {
+			probe_inst_path(path, sizeof(path), root, i, "");
+			(void)sys6(SYS_unlinkat, AT_FDCWD, (sysarg)path,
+				   AT_REMOVEDIR, 0, 0, 0);
+		}
+	}
+	if (probe_threads <= 1) {
+		u64 round;
+
+		for (round = 0; round < probe_rounds; round++) {
+			probe_path(path, sizeof(path), root, "trace");
+			(void)clear_path(path);
+			probe_path(path, sizeof(path), root, "tracing_on");
+			(void)write_path(path, "1\n");
+			probe_trigger_cheap();
+			(void)write_path(path, "0\n");
+			if (count_trace(root))
+				goto out;
+		}
+	}
+
+	/* Namespace/mount triggers are destructive to a private mount namespace
+	 * only, so run them once after the repeated cheap triggers. */
+	probe_path(path, sizeof(path), root, "trace");
+	(void)clear_path(path);
+	probe_path(path, sizeof(path), root, "tracing_on");
+	(void)write_path(path, "1\n");
+	probe_trigger_ns();
+	(void)write_path(path, "0\n");
+	if (count_trace(root))
+		goto out;
+
+	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++) {
+		o_put(P "probe ");
+		o_put(hit_probes[i].symbol);
+		o_put("=");
+		o_dec(hit_probes[i].count);
+		o_put("\n");
+	}
+	probe_bits[0] = 0;
+	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++) {
+		u64 word = i / 32, bit = i % 32;
+
+		if (!hit_probes[i].count)
+			continue;
+		if (word >= SUSFS_HOOK_WORDS)
+			break;
+		probe_bits[word] |= (u32)1 << bit;
+	}
+	o_flush();
+	rc = 0;
+
+out:
+	for (i = 0; i < sizeof(hit_probes) / sizeof(hit_probes[0]); i++)
+		probe_finish(&hit_probes[i], root);
+	return rc;
+}
+/* Write probe_bits into the module's .data.susfs_hook_map.  The symbol lookup is
+ * the same ELF .symtab the loader already validates; the map is in an allocated
+ * PROGBITS section, so its file offset is section->sh_offset + (st_value - sh_addr).
+ * ready is written last: a failed or partial patch leaves the default-0 map and
+ * the module falls back to the current mechanisms. */
+static int patch_hook_map(char *img, u64 size, struct elf64_shdr *shdrs,
+			  u64 shnum, struct elf64_shdr *symtab,
+			  struct elf64_shdr *strtab)
+{
+	const char name[] = "susfs_hook_map";
+	u64 nsyms = symtab->sh_size / sizeof(struct elf64_sym);
+	u64 i;
+
+	for (i = 1; i < nsyms; i++) {
+		struct elf64_sym *sym = (struct elf64_sym *)(img + symtab->sh_offset) + i;
+		struct elf64_shdr *sec;
+		struct loader_hook_map *map;
+		u64 off, nlen = 0, j;
+
+		if (sym->st_shndx == SHN_UNDEF || sym->st_shndx >= shnum ||
+		    sym->st_name >= strtab->sh_size)
+			continue;
+		if (!s_eq_n(img + strtab->sh_offset + sym->st_name, name, sizeof(name) - 1))
+			continue;
+		j = strtab->sh_size - sym->st_name;
+		while (nlen < j && img[strtab->sh_offset + sym->st_name + nlen])
+			nlen++;
+		if (nlen != sizeof(name) - 1)
+			continue;
+		sec = &shdrs[sym->st_shndx];
+		if (sec->sh_type == SHT_NOBITS || !sec_in_image(sec, size))
+			return -1;
+		off = sec->sh_offset + (sym->st_value - sec->sh_addr);
+		if (off > size || sizeof(*map) > size - off)
+			return -1;
+		map = (struct loader_hook_map *)(img + off);
+		map->abi = SUSFS_HOOK_MAP_ABI;
+		map->nbits = SUSFS_HOOK_SLOT_COUNT;
+		for (j = 0; j < SUSFS_HOOK_WORDS; j++)
+			map->bits[j] = probe_bits[j];
+		__sync_synchronize();
+		map->ready = SUSFS_HOOK_MAP_READY;
+		o_put(P "hook map patched: ");
+		for (j = SUSFS_HOOK_WORDS; j > 0; j--) {
+			if (j != SUSFS_HOOK_WORDS)
+				o_put(" ");
+			o_hex(probe_bits[j - 1]);
+		}
+		o_put(" -> ");
+		o_put(name);
+		o_put("\n");
+		o_flush();
+		return 0;
+	}
+	return -1;
+}
+
+/* -------------------------------------------------------------------------- *
  * main                                                                        *
  * -------------------------------------------------------------------------- */
 
 static void usage(void)
 {
 	o_put(P "usage: susfs_insmod [-v] <module.ko> [module-params ...]\n");
+	o_put(P "       susfs_insmod -p [rounds] [-t [threads]] <module.ko> [module-params ...]\n");
+	o_put(P "       susfs_insmod -P [map-file]\n");
+	o_put(P "       -p probes every slot before the load (rounds default 100); a valid\n");
+	o_put(P "          cache for this kernel release is reused, -t forces a fresh probe\n");
+	o_put(P "       -t splits the probe triggers over threads (default 4, max 12; needs -p)\n");
+	o_put(P "       -P only makes a map: with a path it probes and writes that file without\n");
+	o_put(P "          a digest (ZIP side), without one it refreshes the cached map\n");
 	o_flush();
 	finish(2);
 }
@@ -833,12 +2028,91 @@ void insmod_main(long argc, char **argv)
 	u32 resolved = 0, unresolved = 0, unresolved_weak = 0, unresolved_hard = 0;
 	u32 listed = 0, bad_sym = 0;
 	int retried = 0;
+	int do_probe = 0;
+	int probe_force = 0;
+	const char *pn_path = 0;
+	int pn_fill_sha = 0;
 
 	/* ---- argv ---- */
 	u = 1;
+	/* -P [file]: map only, no module.  A path writes that map without a digest
+	 * (ZIP side, sealed at install); no path refreshes the cached map. */
+	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'P' && argv[u][2] == 0) {
+		u++;
+		if (u < (u64)argc && argv[u][0] != '-')
+			pn_path = argv[u++];
+		else
+			pn_fill_sha = 1;
+		if (pn_fill_sha && u < (u64)argc)
+			die("-P without a map file takes no further arguments", -22);
+	}
+	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'p' && argv[u][2] == 0) {
+		u32 rounds;
+
+		do_probe = 1;
+		u++;
+		/* Optional count: -p N.  A module path that starts with digits still
+		 * carries a '.' or '/', so parse_rounds() cannot swallow it. */
+		if (u < (u64)argc && (rounds = parse_rounds(argv[u])) != 0) {
+			probe_rounds = rounds;
+			u++;
+		}
+	}
 	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'v' && argv[u][2] == 0) {
 		verbose = 1;
 		u++;
+	}
+	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 't' && argv[u][2] == 0) {
+		u32 n;
+
+		if (!do_probe)
+			die("-t needs -p (the probe mode)", -22);
+		probe_force = 1;
+		u++;
+		/* Optional count: -t [threads].  Without one, 4 threads; capped at
+		 * PROBE_MAX_THREADS. */
+		if (u < (u64)argc && (n = parse_rounds(argv[u])) != 0) {
+			u++;
+			if (n > PROBE_MAX_THREADS)
+				n = PROBE_MAX_THREADS;
+			probe_threads = n;
+		} else {
+			probe_threads = 4;
+		}
+	}
+	if (pn_path || pn_fill_sha) {
+		char kver[64];
+
+		if (probe_hits()) {
+			o_put(P "-P: probe failed\n");
+			o_flush();
+			finish(1);
+		}
+		if (probe_kver(kver, sizeof(kver)))
+			kver[0] = 0;
+		if (pn_path) {
+			/* ZIP-side map: written without a digest, sealed at
+			 * install time. */
+			if (probe_map_store(pn_path, probe_bits, kver, 0)) {
+				o_put(P "-P: cannot write the map file\n");
+				o_flush();
+				finish(1);
+			}
+			o_put(P "-P: wrote ");
+			o_put(pn_path);
+			o_put(" (no digest)\n");
+		} else {
+			/* -p without the module load: refresh the local cache. */
+			if (probe_map_store(PROBE_CACHE_PATH, probe_bits, kver,
+					    1)) {
+				o_put(P "-P: cannot write the cache\n");
+				o_flush();
+				finish(1);
+			}
+			o_put(P "-P: refreshed " PROBE_CACHE_PATH "\n");
+		}
+		o_flush();
+		finish(0);
 	}
 	if (u >= (u64)argc)
 		usage();
@@ -945,6 +2219,46 @@ void insmod_main(long argc, char **argv)
 		o_dec(strtab->sh_size);
 		o_put(" bytes)\n");
 		o_flush();
+	}
+
+	if (do_probe) {
+		char cur[64] = "", cached[64] = "";
+		int reuse = 0;
+
+		if (probe_kver(cur, sizeof(cur)))
+			cur[0] = 0;
+		if (!probe_force &&
+		    !probe_map_load(PROBE_CACHE_PATH, probe_bits, cached,
+				    sizeof(cached), 1) &&
+		    cur[0] && str_eq(cached, cur)) {
+			o_put(P "probe: reusing the cached map for kernel ");
+			o_put(cur);
+			o_put("\n");
+			reuse = 1;
+		}
+		if (!reuse) {
+			int pr = probe_hits();
+
+			if (pr) {
+				o_put(P "probe failed; module map stays default-0 (fallback)\n");
+				o_flush();
+			} else if (probe_map_store(PROBE_CACHE_PATH, probe_bits,
+						   cur, 1) == 0) {
+				o_put(P "probe: map cached for kernel ");
+				o_put(cur);
+				o_put("\n");
+			}
+		}
+		o_flush();
+		if (!reuse && !probe_bits[0] && !probe_bits[1]) {
+			o_put(P "probe produced an empty map; module falls back\n");
+			o_flush();
+		}
+		if (patch_hook_map(img, (u64)size, shdrs, eh->e_shnum,
+				   symtab, strtab)) {
+			o_put(P "hook map symbol not found; module map stays default-0\n");
+			o_flush();
+		}
 	}
 
 	/* ---- collect the undefined symbols ---- */
@@ -1274,16 +2588,11 @@ void insmod_main(long argc, char **argv)
 }
 
 #if !defined(SUSFS_INSMOD_HOSTTEST)
-__asm__(
-".text\n"
-".global _start\n"
-".type _start,%function\n"
-"_start:\n"
-"	mov	x29, #0\n"
-"	ldr	x0, [sp]\n"
-"	add	x1, sp, #8\n"
-"	bl	insmod_main\n"
-"	mov	x8, #93\n"
-"	svc	#0\n"
-);
+/* Built with the NDK now, so the C runtime owns the entry point: keep the
+ * hand-written syscall helpers, but let bionic's crt call main(). */
+int main(int argc, char **argv)
+{
+	insmod_main((long)argc, argv);
+	return 0;
+}
 #endif

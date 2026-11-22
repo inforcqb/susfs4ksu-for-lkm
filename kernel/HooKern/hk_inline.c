@@ -3,6 +3,12 @@
  * Copyright (C) 2026 dere3046
  */
 
+/* Keep the engine's messages under the module's own prefix, so a dmesg line
+ * reads "susfs_guard_lkm: [lkmhook] ..." like every other layer's log. */
+#ifndef pr_fmt
+#define pr_fmt(fmt) "susfs_guard_lkm: " fmt
+#endif
+
 #include <linux/errno.h>
 #include <linux/list.h>
 #include <asm/tlbflush.h>
@@ -13,6 +19,7 @@
 #include <linux/printk.h>
 #include <linux/rcupdate_trace.h>
 #include <linux/slab.h>
+#include <linux/stop_machine.h>
 #include <linux/string.h>
 #include <linux/types.h>
 #include <linux/uaccess.h>
@@ -22,6 +29,7 @@
 #include "hk.h"
 #include "hk_patch.h"
 #include "hk_inline.h"
+#include "hk_exec_nx.h"
 
 #define HK_TRAMP_SIZE 4096
 #define HK_INS_LDR_X17 0x58000051
@@ -554,10 +562,131 @@ typedef void *(*hk_vmalloc_node_range_fn)(unsigned long size,
 					  int node,
 					  const void *caller);
 
+typedef int (*hk_exec_nofault_fn)(void *dst, const void *src, size_t size);
+static hk_exec_nofault_fn g_exec_nofault;
+
+static hk_nx_desc hk_exec_read_entry(void *entry)
+{
+	return READ_ONCE(*(unsigned long *)entry);
+}
+
+static void *hk_exec_child(hk_nx_desc desc)
+{
+	unsigned long pfn = pte_pfn(__pte((pteval_t)desc));
+
+	if (!pfn_valid(pfn))
+		return NULL;
+	return __va((phys_addr_t)pfn << PAGE_SHIFT);
+}
+
+static void *hk_exec_entry_at(void *table, unsigned int index)
+{
+	return (unsigned long *)table + index;
+}
+
+static __nocfi noinline int hk_exec_write_entry(void *entry, hk_nx_desc desc)
+{
+	unsigned long value = desc;
+	hk_exec_nofault_fn fn = READ_ONCE(g_exec_nofault);
+
+	/* Ordinary table write faults use the kernel's exception-table recovery. */
+	if (!fn)
+		return -EOPNOTSUPP;
+	return fn(entry, &value, sizeof(value));
+}
+
+static void hk_exec_flush_tables(void)
+{
+	/* Table permission changes cover more than the trampoline VA. Invalidate
+	 * all stage-1 EL1 translations and walk caches, including other CPUs.
+	 */
+	flush_tlb_all();
+}
+
+static const struct hk_nx_ops hk_exec_nx_ops = {
+	.read = hk_exec_read_entry,
+	.child = hk_exec_child,
+	.entry = hk_exec_entry_at,
+	.write = hk_exec_write_entry,
+	.flush = hk_exec_flush_tables,
+};
+
+static int hk_exec_clear_stopped(void *data)
+{
+	return hk_nx_clear_page(data);
+}
+
+static __nocfi noinline int hk_exec_clear_nx(void *mem)
+{
+	int (*stop_fn)(cpu_stop_fn_t, void *, const struct cpumask *);
+	struct hk_nx_request req = {
+		.ops = &hk_exec_nx_ops,
+		.addr = (unsigned long)mem,
+	};
+	struct mm_struct *mm;
+	unsigned long symbol;
+	u64 tcr = read_sysreg(tcr_el1);
+	unsigned int tg1 = (tcr >> 30) & 3;
+	unsigned int page_shift = tg1 == 2 ? 12 : tg1 == 1 ? 14 : 16;
+	unsigned int va_bits = 64 - ((tcr >> 16) & 63);
+	unsigned int levels;
+	int ret;
+
+	/* Interpret the live tables with THIS kernel's geometry: the module is
+	 * built against a GKI tree (48-bit, 4 levels), but a vendor kernel may
+	 * run 39-bit/3 levels.  Comparing against the build-time
+	 * CONFIG_PGTABLE_LEVELS rejected such kernels outright (-EINVAL), which
+	 * surfaced as SUSFS_HOOK_INSTALL_FAILED (-225) on a Samsung 5.15. */
+	if (!tg1 || page_shift != PAGE_SHIFT || va_bits <= page_shift ||
+	    (va_bits - page_shift) % 9)
+		goto bad_tcr;
+	levels = DIV_ROUND_UP(va_bits - page_shift, 9);
+	if (levels < 2 || levels > 5)
+		goto bad_tcr;
+	req.root_shift = va_bits - 9;
+	req.page_shift = page_shift;
+
+	mm = (struct mm_struct *)hk_resolve("init_mm");
+	if (!mm || !hk_ker_addr_ok((unsigned long)mm))
+		return -ENOENT;
+	symbol = hk_resolve("stop_machine");
+	if (!symbol || !hk_ker_addr_ok(symbol))
+		return -ENOENT;
+	stop_fn = (void *)symbol;
+	symbol = hk_resolve("copy_to_kernel_nofault");
+	if (symbol && hk_ker_addr_ok(symbol))
+		WRITE_ONCE(g_exec_nofault, (hk_exec_nofault_fn)symbol);
+	/* mem stays allocated, and the PGD lives with init_mm. All descendant
+	 * reads, neighbour checks, writes and rollback run with CPUs stopped.
+	 * The root entry is indexed with the run-time root_shift; pgd_offset()
+	 * would use the build-time PGDIR_SHIFT (39 for 48-bit versus 30 for
+	 * 39-bit) and walk the wrong entry.
+	 */
+	req.root = (void *)((unsigned long *)mm->pgd +
+			    (((unsigned long)mem >> req.root_shift) & 0x1ff));
+	ret = stop_fn(hk_exec_clear_stopped, &req, NULL);
+	if (ret)
+		pr_err("[lkmhook] trampoline NX check/clear %px failed %d stage=%d rollback=%d\n",
+		       mem, ret, req.eio_stage, req.rollback_error);
+	else
+		pr_info("[lkmhook] trampoline %px stage-1 NX verified, cleared=%u tables=%u\n",
+			mem, req.cleared, req.tables_cleared);
+	return ret;
+
+bad_tcr:
+	pr_err("[lkmhook] trampoline NX: incompatible TCR=%#llx\n", tcr);
+	return -EINVAL;
+}
+
 static __nocfi noinline void *hk_exec_alloc(unsigned long size)
 {
 	hk_vmalloc_node_range_fn fn;
+	void *mem;
 	const char *name = "__vmalloc_node_range";
+
+	/* The relocation buffer fits one page, including 16K/64K page builds. */
+	if (!size || size > PAGE_SIZE)
+		return NULL;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 	name = "__vmalloc_node_range_noprof";
@@ -565,10 +694,26 @@ static __nocfi noinline void *hk_exec_alloc(unsigned long size)
 	fn = (hk_vmalloc_node_range_fn)hk_resolve(name);
 	if (!fn || !hk_ker_addr_ok((unsigned long)fn))
 		return NULL;
-	return fn(size, 1, VMALLOC_START, VMALLOC_END,
-		  GFP_KERNEL | __GFP_NOWARN, PAGE_KERNEL_EXEC,
+	/* Start NX so even kernels without table PXN exercise and verify the
+	 * leaf transition instead of trusting an allocation-time request.
+	 */
+	mem = fn(PAGE_SIZE, PAGE_SIZE, VMALLOC_START, VMALLOC_END,
+		  GFP_KERNEL | __GFP_NOWARN, PAGE_KERNEL,
 		  VM_FLUSH_RESET_PERMS, NUMA_NO_NODE,
 		  __builtin_return_address(0));
+	if (!mem)
+		return NULL;
+
+	/* set_memory_x only updates a leaf on upstream ARM64. Inspect the whole
+	 * path, clear table PXN where it does not unprotect neighbours, and fail
+	 * before publishing any hook if the effective stage-1 permission fails.
+	 */
+	if (hk_exec_clear_nx(mem)) {
+		vfree(mem);
+		return NULL;
+	}
+
+	return mem;
 }
 
 static __nocfi noinline void hk_exec_free(void *mem)
@@ -845,12 +990,12 @@ static void hk_bti_guard_restore(struct hk_inline *h)
 }
 
 static __nocfi int hk_inline_apply(struct hk_inline *h, const char *sym,
-				   const char *wrapper_sym, unsigned long addr)
+				   unsigned long target, unsigned long addr,
+				   bool detect_pac, unsigned long *tramp_out)
 {
 	struct hk_relo_ctx ctx;
 	u32 *tramp;
 	u32 detour[HK_INLINE_ENTRY_MAX];
-	unsigned long wrapper;
 	unsigned long mem;
 	u32 saved[HK_INLINE_ENTRY_MAX];
 	u32 i;
@@ -861,9 +1006,9 @@ static __nocfi int hk_inline_apply(struct hk_inline *h, const char *sym,
 	if (!tramp)
 		return -ENOMEM;
 
-	wrapper = hk_resolve(wrapper_sym);
-	if (!wrapper || !hk_ker_addr_ok(wrapper)) {
-		pr_warn("[lkmhook] inline resolve %s failed\n", wrapper_sym);
+	if (!target || !hk_ker_addr_ok(target)) {
+		pr_warn("[lkmhook] inline target 0x%lx is not a kernel address\n",
+			target);
 		ret = -ENODATA;
 		goto err_free;
 	}
@@ -894,6 +1039,24 @@ static __nocfi int hk_inline_apply(struct hk_inline *h, const char *sym,
 		goto err_free;
 	}
 
+	/*
+	 * A body that signs its own return address cannot be entered through a C
+	 * wrapper: the trampoline executes the original paciasp/pacibsp with the
+	 * wrapper's LR and SP, and the autiasp later in the body authenticates a
+	 * frame the wrapper did not create - measured on 5.15 as
+	 * "Oops - FPAC" at vfs_open+0x664 (the autiasp).  The entry-stub form
+	 * (detect_pac = false) is safe because the stub restores SP/LR before the
+	 * trampoline replays the prologue.
+	 */
+	if (detect_pac &&
+	    (saved[0] == 0xD503233F || saved[0] == 0xD503237F ||
+	     saved[1] == 0xD503233F || saved[1] == 0xD503237F)) {
+		pr_warn("[lkmhook] inline %s has a PAC prologue, refusing the C wrapper form\n",
+			sym);
+		ret = -EOPNOTSUPP;
+		goto err_free;
+	}
+
 	mem = (unsigned long)hk_exec_alloc(HK_TRAMP_SIZE);
 	if (!mem) {
 		pr_warn("[lkmhook] inline exec alloc %s failed\n", sym);
@@ -909,8 +1072,8 @@ static __nocfi int hk_inline_apply(struct hk_inline *h, const char *sym,
 	tramp[0] = HK_INS_BTI_JC;
 	tramp[1] = HK_INS_LDR_X17;
 	tramp[2] = HK_INS_RET_X17;
-	tramp[3] = wrapper & 0xFFFFFFFF;
-	tramp[4] = wrapper >> 32;
+	tramp[3] = target & 0xFFFFFFFF;
+	tramp[4] = target >> 32;
 	tramp[5] = HK_INS_BTI_JC;
 
 	memset(&ctx, 0, sizeof(ctx));
@@ -951,6 +1114,18 @@ static __nocfi int hk_inline_apply(struct hk_inline *h, const char *sym,
 	h->orig = mem + 20;
 
 	/*
+	 * the stub may be called from the instant the detour is written, so the
+	 * trampoline address it will load must be live *before* the write.  A
+	 * stub that reads a zero here would jump to address 0.
+	 */
+	if (tramp_out) {
+		*tramp_out = h->orig;
+		/* the stub may load this from another CPU the instant the
+		 * detour lands; publish it before the entry write */
+		smp_wmb();
+	}
+
+	/*
 	 * the detour is written in one call, so a multi instruction window goes
 	 * through stop_machine: no core is running while the entry changes from
 	 * the caller's bytes to bti jc plus an absolute jump
@@ -984,12 +1159,18 @@ err_free:
 __nocfi int hk_inline_hook(struct hk_inline *h, const char *sym,
 			   const char *wrapper_sym)
 {
-	unsigned long addr = 0;
+	unsigned long addr = 0, raw, wrapper;
 	int ret;
 
 	if (!h || !sym || !wrapper_sym)
 		return -EINVAL;
 
+	raw = hk_resolve(sym);
+	wrapper = hk_resolve(wrapper_sym);
+	if (!wrapper || !hk_ker_addr_ok(wrapper)) {
+		pr_warn("[lkmhook] inline resolve %s failed\n", wrapper_sym);
+		return -ENODATA;
+	}
 	/*
 	 * one lock across trampoline allocation, relocation and both text
 	 * writes, so two installs cannot interleave their trampolines or their
@@ -1000,15 +1181,49 @@ __nocfi int hk_inline_hook(struct hk_inline *h, const char *sym,
 		pr_warn("[lkmhook] inline resolve %s failed %d\n", sym, ret);
 		return -ENODATA;
 	}
+	pr_info("[lkmhook] inline %s raw=0x%lx resolved=0x%lx\n", sym, raw, addr);
 	ret = hk_inline_own(h, sym, addr, HK_INLINE_PATCH_LEN);
 	if (ret)
 		return ret;
 	mutex_lock(&g_inline_lock);
-	ret = hk_inline_apply(h, sym, wrapper_sym, addr);
+	ret = hk_inline_apply(h, sym, wrapper, addr, true, NULL);
 	mutex_unlock(&g_inline_lock);
 	if (ret)
 		hk_inline_release(h);
 	return ret;
+}
+
+__nocfi int hk_inline_hook_stub(struct hk_inline *h, const char *sym,
+				unsigned long stub, unsigned long *tramp_out)
+{
+	unsigned long addr = 0, raw;
+	int ret;
+
+	if (!h || !sym || !stub || !tramp_out)
+		return -EINVAL;
+
+	raw = hk_resolve(sym);
+	ret = hk_read_addr(sym, &addr);
+	if (ret) {
+		pr_warn("[lkmhook] inline resolve %s failed %d\n", sym, ret);
+		return -ENODATA;
+	}
+	pr_info("[lkmhook] inline %s raw=0x%lx resolved=0x%lx stub=0x%lx\n",
+		sym, raw, addr, stub);
+	ret = hk_inline_own(h, sym, addr, HK_INLINE_PATCH_LEN);
+	if (ret)
+		return ret;
+	mutex_lock(&g_inline_lock);
+	ret = hk_inline_apply(h, sym, stub, addr, false, tramp_out);
+	mutex_unlock(&g_inline_lock);
+	if (ret) {
+		/* the trampoline was freed or never written: never leave a stale
+		 * address for the stub's allow path */
+		*tramp_out = 0;
+		hk_inline_release(h);
+		return ret;
+	}
+	return 0;
 }
 
 int __nocfi hk_inline_disable(struct hk_inline *h)
