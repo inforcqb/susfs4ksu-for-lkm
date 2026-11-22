@@ -2024,7 +2024,7 @@ void insmod_main(long argc, char **argv)
 	int retried = 0;
 	int do_probe = 0;
 	int probe_force = 0;
-	const char *map_path = NULL;
+	const char *map_path = 0;
 
 	/* ---- argv ---- */
 	u = 1;
@@ -2179,7 +2179,7 @@ void insmod_main(long argc, char **argv)
 	if (map_path) {
 		/* -P: the caller supplies the map; format-checked, no digest (it is
 		 * a one-shot input, never written back). */
-		if (probe_map_load(map_path, probe_bits, NULL, 0, 0)) {
+		if (probe_map_load(map_path, probe_bits, 0, 0, 0)) {
 			o_put(P "-P: map file is missing or malformed\n");
 			o_flush();
 			finish(1);
