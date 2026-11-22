@@ -1343,6 +1343,249 @@ static int count_trace(const char *root)
 	return 0;
 }
 
+/* ---- SHA-256 (freestanding: no libc) ------------------------------------
+ * The probe cache is bound to one device + one kernel build; the digest over
+ * the whole file is what tells "this cache is intact" from "this file was
+ * edited by hand". */
+struct sha256_ctx {
+	u32 h[8];
+	u64 len;
+	u8 buf[64];
+	u32 n;
+};
+
+static const u32 sha256_k[64] = {
+	0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+	0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+	0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+	0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+	0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+	0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+	0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+	0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+	0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+	0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+	0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+};
+
+#define ROR32(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
+
+static void sha256_block(struct sha256_ctx *c, const u8 *p)
+{
+	u32 w[64], a, b, d, e, f, g, h, t1, t2, cc;
+	u32 i;
+
+	for (i = 0; i < 16; i++)
+		w[i] = ((u32)p[i * 4] << 24) | ((u32)p[i * 4 + 1] << 16) |
+		       ((u32)p[i * 4 + 2] << 8) | (u32)p[i * 4 + 3];
+	for (i = 16; i < 64; i++) {
+		u32 s0 = ROR32(w[i - 15], 7) ^ ROR32(w[i - 15], 18) ^
+			 (w[i - 15] >> 3);
+		u32 s1 = ROR32(w[i - 2], 17) ^ ROR32(w[i - 2], 19) ^
+			 (w[i - 2] >> 10);
+
+		w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+	}
+	a = c->h[0]; b = c->h[1]; cc = c->h[2]; d = c->h[3];
+	e = c->h[4]; f = c->h[5]; g = c->h[6]; h = c->h[7];
+	for (i = 0; i < 64; i++) {
+		u32 s1 = ROR32(e, 6) ^ ROR32(e, 11) ^ ROR32(e, 25);
+		u32 ch = (e & f) ^ (~e & g);
+		u32 s0 = ROR32(a, 2) ^ ROR32(a, 13) ^ ROR32(a, 22);
+		u32 mj = (a & b) ^ (a & cc) ^ (b & cc);
+
+		t1 = h + s1 + ch + sha256_k[i] + w[i];
+		t2 = s0 + mj;
+		h = g; g = f; f = e; e = d + t1;
+		d = cc; cc = b; b = a; a = t1 + t2;
+	}
+	c->h[0] += a; c->h[1] += b; c->h[2] += cc; c->h[3] += d;
+	c->h[4] += e; c->h[5] += f; c->h[6] += g; c->h[7] += h;
+}
+
+static void sha256_init(struct sha256_ctx *c)
+{
+	c->h[0] = 0x6a09e667; c->h[1] = 0xbb67ae85;
+	c->h[2] = 0x3c6ef372; c->h[3] = 0xa54ff53a;
+	c->h[4] = 0x510e527f; c->h[5] = 0x9b05688c;
+	c->h[6] = 0x1f83d9ab; c->h[7] = 0x5be0cd19;
+	c->len = 0;
+	c->n = 0;
+}
+
+static void sha256_update(struct sha256_ctx *c, const void *data, u64 len)
+{
+	const u8 *p = data;
+
+	c->len += len;
+	while (len--) {
+		c->buf[c->n++] = *p++;
+		if (c->n == 64) {
+			sha256_block(c, c->buf);
+			c->n = 0;
+		}
+	}
+}
+
+static void sha256_final(struct sha256_ctx *c, u8 out[32])
+{
+	u64 bits = c->len * 8;
+	u8 pad = 0x80;
+	u8 zero = 0;
+	u32 i;
+
+	sha256_update(c, &pad, 1);
+	while (c->n != 56)
+		sha256_update(c, &zero, 1);
+	for (i = 0; i < 8; i++) {
+		u8 b = (u8)(bits >> (56 - i * 8));
+
+		sha256_update(c, &b, 1);
+	}
+	for (i = 0; i < 8; i++) {
+		out[i * 4] = (u8)(c->h[i] >> 24);
+		out[i * 4 + 1] = (u8)(c->h[i] >> 16);
+		out[i * 4 + 2] = (u8)(c->h[i] >> 8);
+		out[i * 4 + 3] = (u8)c->h[i];
+	}
+}
+
+/* ---- probe cache ---------------------------------------------------------
+ * The map is bound to one device + one kernel build, so a valid cache is
+ * reused instead of probing again: the file carries the kernel release and a
+ * SHA-256 over itself.  A missing file, a format error, a bad digest or a
+ * different release all mean "probe again and overwrite". */
+#define PROBE_CACHE_PATH "/data/adb/susfs_probe_map"
+#define PROBE_MAP_VERSION 1
+
+struct probe_map_file {
+	char magic[8];
+	u32 version;
+	u32 words;
+	u32 kver_len;
+	u32 reserved;
+	char kver[64];
+	u32 bits[SUSFS_HOOK_WORDS];
+	u8 sha[32];
+};
+
+static bool str_eq(const char *a, const char *b)
+{
+	u64 n = 0;
+
+	while (a[n] && a[n] == b[n])
+		n++;
+	return a[n] == b[n];
+}
+
+/* struct new_utsname: sysname[65], nodename[65], release[65], version[65],
+ * machine[65], domainname[65]; release starts at offset 130. */
+static int probe_kver(char *out, u64 cap)
+{
+	char uts[390];
+	u64 i;
+
+	if (sys6(SYS_uname, (sysarg)uts, 0, 0, 0, 0, 0) < 0)
+		return -1;
+	for (i = 0; i + 1 < cap && i < 64 && uts[130 + i]; i++)
+		out[i] = uts[130 + i];
+	out[i] = 0;
+	return 0;
+}
+
+/* @verify_sha = 0 is the user-supplied -P map: format-checked only. */
+static int probe_map_load(const char *path, u32 *bits, char *kver,
+			  u64 kver_cap, int verify_sha)
+{
+	struct probe_map_file m;
+	static const char magic[8] = { 'S', 'U', 'S', 'F', 'S', 'M', 'A', 'P' };
+	sysarg fd, r;
+	u64 got = 0, i;
+
+	fd = xopen(path, O_RDONLY);
+	if (fd < 0)
+		return -1;
+	while (got < sizeof(m)) {
+		r = sys6(SYS_read, fd, (sysarg)((u8 *)&m + got),
+			 (sysarg)(sizeof(m) - got), 0, 0, 0);
+		if (r <= 0)
+			break;
+		got += (u64)r;
+	}
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+	if (got != sizeof(m))
+		return -1;
+	for (i = 0; i < 8; i++)
+		if (m.magic[i] != magic[i])
+			return -1;
+	if (m.version != PROBE_MAP_VERSION || m.words != SUSFS_HOOK_WORDS ||
+	    m.kver_len > 64)
+		return -1;
+	if (verify_sha) {
+		struct sha256_ctx c;
+		u8 d[32];
+
+		sha256_init(&c);
+		sha256_update(&c, &m, sizeof(m) - 32);
+		sha256_final(&c, d);
+		for (i = 0; i < 32; i++)
+			if (d[i] != m.sha[i])
+				return -1;
+	}
+	for (i = 0; i < SUSFS_HOOK_WORDS; i++)
+		bits[i] = m.bits[i];
+	if (kver && kver_cap) {
+		for (i = 0; i + 1 < kver_cap && i < 64 && m.kver[i]; i++)
+			kver[i] = m.kver[i];
+		kver[i] = 0;
+	}
+	return 0;
+}
+
+static int probe_map_store(const char *path, const u32 *bits, const char *kver)
+{
+	struct probe_map_file m;
+	struct sha256_ctx c;
+	static const char magic[8] = { 'S', 'U', 'S', 'F', 'S', 'M', 'A', 'P' };
+	u8 d[32];
+	u64 i, n = 0;
+	sysarg fd;
+
+	for (i = 0; i < sizeof(m); i++)
+		((u8 *)&m)[i] = 0;
+	for (i = 0; i < 8; i++)
+		m.magic[i] = magic[i];
+	m.version = PROBE_MAP_VERSION;
+	m.words = SUSFS_HOOK_WORDS;
+	while (kver[n] && n < 64) {
+		m.kver[n] = kver[n];
+		n++;
+	}
+	m.kver_len = (u32)n;
+	for (i = 0; i < SUSFS_HOOK_WORDS; i++)
+		m.bits[i] = bits[i];
+	sha256_init(&c);
+	sha256_update(&c, &m, sizeof(m) - 32);
+	sha256_final(&c, d);
+	for (i = 0; i < 32; i++)
+		m.sha[i] = d[i];
+	fd = sys6(SYS_openat, AT_FDCWD, (sysarg)path,
+		  O_WRONLY | O_CREAT | O_TRUNC, 0644, 0, 0);
+	if (fd < 0)
+		return -1;
+	n = 0;
+	while (n < sizeof(m)) {
+		sysarg w = sys6(SYS_write, fd, (sysarg)((u8 *)&m + n),
+				(sysarg)(sizeof(m) - n), 0, 0, 0);
+
+		if (w <= 0)
+			break;
+		n += (u64)w;
+	}
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+	return n == sizeof(m) ? 0 : -1;
+}
+
 /* Same as count_trace(), for a tracefs instance path.  A whole parallel run is
  * larger than one chunk, so read until EOF and parse each chunk for every slot
  * (one read serves all slots, not one read per slot). */
@@ -1747,8 +1990,11 @@ static void usage(void)
 {
 	o_put(P "usage: susfs_insmod [-v] <module.ko> [module-params ...]\n");
 	o_put(P "       susfs_insmod -p [rounds] [-t [threads]] <module.ko> [module-params ...]\n");
-	o_put(P "       -p probes every slot before the load; rounds defaults to 100\n");
+	o_put(P "       susfs_insmod -P <map-file> <module.ko> [module-params ...]\n");
+	o_put(P "       -p probes every slot before the load (rounds default 100); a valid\n");
+	o_put(P "          cache for this kernel release is reused, -t forces a fresh probe\n");
 	o_put(P "       -t splits the probe triggers over threads (default 4, max 12; needs -p)\n");
+	o_put(P "       -P uses the given map file (format-checked, one shot, no cache write)\n");
 	o_flush();
 	finish(2);
 }
@@ -1777,7 +2023,8 @@ void insmod_main(long argc, char **argv)
 	u32 listed = 0, bad_sym = 0;
 	int retried = 0;
 	int do_probe = 0;
-	int probe_only = 0;
+	int probe_force = 0;
+	const char *map_path = NULL;
 
 	/* ---- argv ---- */
 	u = 1;
@@ -1794,9 +2041,11 @@ void insmod_main(long argc, char **argv)
 		}
 	}
 	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'P' && argv[u][2] == 0) {
-		do_probe = 1;
-		probe_only = 1;
+		/* -P <map file>: use that map (format-checked only, one shot). */
 		u++;
+		if (u >= (u64)argc)
+			die("-P needs a map file", -22);
+		map_path = argv[u++];
 	}
 	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'v' && argv[u][2] == 0) {
 		verbose = 1;
@@ -1806,7 +2055,8 @@ void insmod_main(long argc, char **argv)
 		u32 n;
 
 		if (!do_probe)
-			die("-t needs -p or -P (the probe mode)", -22);
+			die("-t needs -p (the probe mode)", -22);
+		probe_force = 1;
 		u++;
 		/* Optional count: -t [threads].  Without one, 4 threads; capped at
 		 * PROBE_MAX_THREADS. */
@@ -1926,21 +2176,57 @@ void insmod_main(long argc, char **argv)
 		o_flush();
 	}
 
-	if (do_probe) {
-		int pr = probe_hits();
-
-		if (pr) {
-			o_put(P "probe failed; module map stays default-0 (fallback)\n");
+	if (map_path) {
+		/* -P: the caller supplies the map; format-checked, no digest (it is
+		 * a one-shot input, never written back). */
+		if (probe_map_load(map_path, probe_bits, NULL, 0, 0)) {
+			o_put(P "-P: map file is missing or malformed\n");
 			o_flush();
-			if (probe_only)
-				finish(1);
-		} else if (patch_hook_map(img, (u64)size, shdrs, eh->e_shnum,
-					 symtab, strtab)) {
+			finish(1);
+		}
+		if (patch_hook_map(img, (u64)size, shdrs, eh->e_shnum,
+				   symtab, strtab)) {
 			o_put(P "hook map symbol not found; module map stays default-0\n");
 			o_flush();
 		}
-		if (probe_only)
-			finish(0);
+	} else if (do_probe) {
+		char cur[64] = "", cached[64] = "";
+		int reuse = 0;
+
+		if (probe_kver(cur, sizeof(cur)))
+			cur[0] = 0;
+		if (!probe_force &&
+		    !probe_map_load(PROBE_CACHE_PATH, probe_bits, cached,
+				    sizeof(cached), 1) &&
+		    cur[0] && str_eq(cached, cur)) {
+			o_put(P "probe: reusing the cached map for kernel ");
+			o_put(cur);
+			o_put("\n");
+			reuse = 1;
+		}
+		if (!reuse) {
+			int pr = probe_hits();
+
+			if (pr) {
+				o_put(P "probe failed; module map stays default-0 (fallback)\n");
+				o_flush();
+			} else if (probe_map_store(PROBE_CACHE_PATH, probe_bits,
+						   cur) == 0) {
+				o_put(P "probe: map cached for kernel ");
+				o_put(cur);
+				o_put("\n");
+			}
+		}
+		o_flush();
+		if (!reuse && !probe_bits[0] && !probe_bits[1]) {
+			o_put(P "probe produced an empty map; module falls back\n");
+			o_flush();
+		}
+		if (patch_hook_map(img, (u64)size, shdrs, eh->e_shnum,
+				   symtab, strtab)) {
+			o_put(P "hook map symbol not found; module map stays default-0\n");
+			o_flush();
+		}
 	}
 
 	/* ---- collect the undefined symbols ---- */
