@@ -2,6 +2,7 @@
   const header = document.querySelector('.site-header');
   const nav = document.getElementById('site-nav');
   const navToggle = document.querySelector('.nav-toggle');
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const setMenu = (open) => {
     if (!nav || !navToggle) return;
@@ -31,8 +32,14 @@
   });
 
   window.addEventListener('resize', () => {
-    if (window.matchMedia('(min-width: 52.01rem)').matches) setMenu(false);
+    if (window.innerWidth > 900) setMenu(false);
   });
+
+  const onScroll = () => {
+    header?.classList.toggle('is-scrolled', window.scrollY > 12);
+  };
+  onScroll();
+  window.addEventListener('scroll', onScroll, { passive: true });
 
   const navLinks = [...document.querySelectorAll('.site-nav a[href^="#"]')];
   const sections = navLinks
@@ -41,8 +48,7 @@
 
   const setActiveLink = (id) => {
     navLinks.forEach((link) => {
-      if (link.hash === `#${id}`) link.setAttribute('aria-current', 'location');
-      else link.removeAttribute('aria-current');
+      link.classList.toggle('is-active', link.getAttribute('href') === `#${id}`);
     });
   };
 
@@ -86,7 +92,6 @@
       if (focus) tab.focus();
     };
 
-    activate(tabs.find((tab) => tab.getAttribute('aria-selected') === 'true') || tabs[0]);
     tabs.forEach((tab) => {
       tab.addEventListener('click', () => activate(tab));
     });
@@ -133,26 +138,43 @@
   };
 
   document.querySelectorAll('[data-copy]').forEach((button) => {
-    const original = button.textContent;
-    let restoreLabel;
     button.addEventListener('click', async () => {
       const pane = button.closest('.code-pane');
       const code = pane?.querySelector('pre code');
       if (!code) return;
 
-      window.clearTimeout(restoreLabel);
+      const original = button.textContent;
       try {
         await copyText(code.textContent.replace(/\r\n/g, '\n').trim());
         button.textContent = '已复制';
+        button.classList.add('is-copied');
       } catch {
         button.textContent = '复制失败';
       }
 
-      restoreLabel = window.setTimeout(() => {
+      window.setTimeout(() => {
         button.textContent = original;
+        button.classList.remove('is-copied');
       }, 1800);
     });
   });
 
-  document.documentElement.classList.add('js');
+  const revealItems = [...document.querySelectorAll('.reveal')];
+  if (reduceMotion || !('IntersectionObserver' in window)) {
+    revealItems.forEach((item) => item.classList.add('is-visible'));
+  } else {
+    const revealObserver = new IntersectionObserver((entries, observer) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add('is-visible');
+        observer.unobserve(entry.target);
+      });
+    }, { rootMargin: '0px 0px -7% 0px', threshold: 0.05 });
+
+    revealItems.forEach((item) => revealObserver.observe(item));
+  }
+
+  document.querySelectorAll('[data-year]').forEach((item) => {
+    item.textContent = String(new Date().getFullYear());
+  });
 })();
