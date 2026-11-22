@@ -1577,7 +1577,7 @@ static int probe_hits(void)
 	}
 
 	if (probe_threads > 1) {
-		u32 i, started = 0;
+		u32 i, started = 0, idx;
 		char ep[320];
 
 		/* Attach them all, trigger in parallel: every instance enables
