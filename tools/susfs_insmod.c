@@ -1542,7 +1542,10 @@ static int probe_map_load(const char *path, u32 *bits, char *kver,
 	return 0;
 }
 
-static int probe_map_store(const char *path, const u32 *bits, const char *kver)
+/* @with_sha = 0 leaves the digest zero: that is the ZIP-side map, sealed
+ * later by the install step (-P without a path). */
+static int probe_map_store(const char *path, const u32 *bits, const char *kver,
+			   int with_sha)
 {
 	struct probe_map_file m;
 	struct sha256_ctx c;
@@ -1567,8 +1570,10 @@ static int probe_map_store(const char *path, const u32 *bits, const char *kver)
 	sha256_init(&c);
 	sha256_update(&c, &m, sizeof(m) - 32);
 	sha256_final(&c, d);
-	for (i = 0; i < 32; i++)
-		m.sha[i] = d[i];
+	if (with_sha) {
+		for (i = 0; i < 32; i++)
+			m.sha[i] = d[i];
+	}
 	fd = sys6(SYS_openat, AT_FDCWD, (sysarg)path,
 		  O_WRONLY | O_CREAT | O_TRUNC, 0644, 0, 0);
 	if (fd < 0)
@@ -1990,13 +1995,12 @@ static void usage(void)
 {
 	o_put(P "usage: susfs_insmod [-v] <module.ko> [module-params ...]\n");
 	o_put(P "       susfs_insmod -p [rounds] [-t [threads]] <module.ko> [module-params ...]\n");
-	o_put(P "       susfs_insmod -P <map-file> <module.ko> [module-params ...]\n");
+	o_put(P "       susfs_insmod -P [map-file]\n");
 	o_put(P "       -p probes every slot before the load (rounds default 100); a valid\n");
 	o_put(P "          cache for this kernel release is reused, -t forces a fresh probe\n");
 	o_put(P "       -t splits the probe triggers over threads (default 4, max 12; needs -p)\n");
-	o_put(P "       -P uses the given map file (format-checked, one shot, no cache write)\n");
-	o_put(P "       -pn [map-file] only makes a map: with a path it probes and writes it,\n");
-	o_put(P "          without one it re-seals the cached map (install-time, ZIP friendly)\n");
+	o_put(P "       -P only makes a map: with a path it probes and writes that file without\n");
+	o_put(P "          a digest (ZIP side), without one it refreshes the cached map\n");
 	o_flush();
 	finish(2);
 }
@@ -2026,23 +2030,21 @@ void insmod_main(long argc, char **argv)
 	int retried = 0;
 	int do_probe = 0;
 	int probe_force = 0;
-	const char *map_path = 0;
 	const char *pn_path = 0;
 	int pn_fill_sha = 0;
 
 	/* ---- argv ---- */
 	u = 1;
-	/* -pn [file]: map only.  With a path it probes once and writes that map;
-	 * without one it re-seals the cached map (SHA-256) for the installer. */
-	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'p' &&
-	    argv[u][2] == 'n' && argv[u][3] == 0) {
+	/* -P [file]: map only, no module.  A path writes that map without a digest
+	 * (ZIP side, sealed at install); no path refreshes the cached map. */
+	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'P' && argv[u][2] == 0) {
 		u++;
 		if (u < (u64)argc && argv[u][0] != '-')
 			pn_path = argv[u++];
 		else
 			pn_fill_sha = 1;
 		if (pn_fill_sha && u < (u64)argc)
-			die("-pn without a path takes no further arguments", -22);
+			die("-P without a map file takes no further arguments", -22);
 	}
 	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'p' && argv[u][2] == 0) {
 		u32 rounds;
@@ -2055,13 +2057,6 @@ void insmod_main(long argc, char **argv)
 			probe_rounds = rounds;
 			u++;
 		}
-	}
-	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'P' && argv[u][2] == 0) {
-		/* -P <map file>: use that map (format-checked only, one shot). */
-		u++;
-		if (u >= (u64)argc)
-			die("-P needs a map file", -22);
-		map_path = argv[u++];
 	}
 	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'v' && argv[u][2] == 0) {
 		verbose = 1;
@@ -2087,38 +2082,34 @@ void insmod_main(long argc, char **argv)
 	}
 	if (pn_path || pn_fill_sha) {
 		char kver[64];
-		u32 bits[SUSFS_HOOK_WORDS];
 
-		if (pn_fill_sha) {
-			/* Install-time pre-processing: re-hash the cached map. */
-			if (probe_map_load(PROBE_CACHE_PATH, bits, kver,
-					   sizeof(kver), 0)) {
-				o_put(P "-pn: no cached map to seal\n");
+		if (probe_hits()) {
+			o_put(P "-P: probe failed\n");
+			o_flush();
+			finish(1);
+		}
+		if (probe_kver(kver, sizeof(kver)))
+			kver[0] = 0;
+		if (pn_path) {
+			/* ZIP-side map: written without a digest, sealed at
+			 * install time. */
+			if (probe_map_store(pn_path, probe_bits, kver, 0)) {
+				o_put(P "-P: cannot write the map file\n");
 				o_flush();
 				finish(1);
 			}
-			if (probe_map_store(PROBE_CACHE_PATH, bits, kver)) {
-				o_put(P "-pn: cannot write the cache\n");
-				o_flush();
-				finish(1);
-			}
-			o_put(P "-pn: sealed " PROBE_CACHE_PATH "\n");
-		} else {
-			if (probe_hits()) {
-				o_put(P "-pn: probe failed\n");
-				o_flush();
-				finish(1);
-			}
-			if (probe_kver(kver, sizeof(kver)))
-				kver[0] = 0;
-			if (probe_map_store(pn_path, probe_bits, kver)) {
-				o_put(P "-pn: cannot write the map file\n");
-				o_flush();
-				finish(1);
-			}
-			o_put(P "-pn: wrote ");
+			o_put(P "-P: wrote ");
 			o_put(pn_path);
-			o_put("\n");
+			o_put(" (no digest)\n");
+		} else {
+			/* -p without the module load: refresh the local cache. */
+			if (probe_map_store(PROBE_CACHE_PATH, probe_bits, kver,
+					    1)) {
+				o_put(P "-P: cannot write the cache\n");
+				o_flush();
+				finish(1);
+			}
+			o_put(P "-P: refreshed " PROBE_CACHE_PATH "\n");
 		}
 		o_flush();
 		finish(0);
@@ -2230,20 +2221,7 @@ void insmod_main(long argc, char **argv)
 		o_flush();
 	}
 
-	if (map_path) {
-		/* -P: the caller supplies the map; format-checked, no digest (it is
-		 * a one-shot input, never written back). */
-		if (probe_map_load(map_path, probe_bits, 0, 0, 0)) {
-			o_put(P "-P: map file is missing or malformed\n");
-			o_flush();
-			finish(1);
-		}
-		if (patch_hook_map(img, (u64)size, shdrs, eh->e_shnum,
-				   symtab, strtab)) {
-			o_put(P "hook map symbol not found; module map stays default-0\n");
-			o_flush();
-		}
-	} else if (do_probe) {
+	if (do_probe) {
 		char cur[64] = "", cached[64] = "";
 		int reuse = 0;
 
@@ -2265,7 +2243,7 @@ void insmod_main(long argc, char **argv)
 				o_put(P "probe failed; module map stays default-0 (fallback)\n");
 				o_flush();
 			} else if (probe_map_store(PROBE_CACHE_PATH, probe_bits,
-						   cur) == 0) {
+						   cur, 1) == 0) {
 				o_put(P "probe: map cached for kernel ");
 				o_put(cur);
 				o_put("\n");
