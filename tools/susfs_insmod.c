@@ -1343,6 +1343,39 @@ static int count_trace(const char *root)
 	return 0;
 }
 
+/* Same as count_trace(), for a tracefs instance path.  A whole parallel run is
+ * larger than one chunk, so read until EOF and parse each chunk for every slot
+ * (one read serves all slots, not one read per slot). */
+static int count_trace_path(const char *trace_path)
+{
+	char needle[64];
+	static char trace[65536];
+	u64 i, n, j;
+	sysarg fd;
+
+	fd = xopen(trace_path, O_RDONLY);
+	if (fd < 0)
+		return -1;
+	for (;;) {
+		sysarg r = sys6(SYS_read, fd, (sysarg)trace, sizeof(trace),
+				0, 0, 0);
+
+		if (r <= 0)
+			break;
+		for (i = 0; i < PROBE_SLOT_COUNT; i++) {
+			n = 0;
+			for (j = 0; hit_probes[i].event[j]; j++)
+				needle[n++] = hit_probes[i].event[j];
+			needle[n++] = ':';
+			needle[n] = 0;
+			hit_probes[i].count +=
+				(u32)count_sub(trace, (u64)r, needle, n);
+		}
+	}
+	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
+	return 0;
+}
+
 #define PROBE_MAX_THREADS 12
 #define PROBE_THREAD_STACK 16384
 
@@ -1486,37 +1519,6 @@ static void probe_inst_event(char *dst, u64 cap, const char *root, u32 wid,
 
 /* One read buffer per worker: the workers read different instances at the
  * same time, so a shared static buffer would race with itself. */
-static char probe_trace_buf[PROBE_MAX_THREADS][65536];
-
-static u32 count_trace_event_buf(const char *trace_path, const char *event,
-				 char *buf)
-{
-	char needle[64];
-	u64 n = 0, j;
-	u32 total = 0;
-	sysarg fd;
-
-	fd = xopen(trace_path, O_RDONLY);
-	if (fd < 0)
-		return 0;
-	for (j = 0; event[j]; j++)
-		needle[n++] = event[j];
-	needle[n++] = ':';
-	needle[n] = 0;
-	/* Read the whole trace, not just the first 64 KB: the parallel phase
-	 * accumulates every worker's hits into one instance, which is far more
-	 * than a single round.  seq_read() returns 0 at EOF after the last
-	 * chunk, so this cannot loop forever. */
-	for (;;) {
-		sysarg r = sys6(SYS_read, fd, (sysarg)buf, 65536, 0, 0, 0);
-
-		if (r <= 0)
-			break;
-		total += (u32)count_sub(buf, (u64)r, needle, n);
-	}
-	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
-	return total;
-}
 
 /* Each worker owns one tracefs instance (instances/pwN) with its own trace
  * buffer and tracing_on, so there is no global lock: workers trigger and read
@@ -1575,7 +1577,7 @@ static int probe_hits(void)
 	}
 
 	if (probe_threads > 1) {
-		u32 i, started = 0, idx;
+		u32 i, started = 0;
 		char ep[320];
 
 		/* Attach them all, trigger in parallel: every instance enables
@@ -1616,12 +1618,10 @@ static int probe_hits(void)
 			probe_inst_path(path, sizeof(path), root, i, "tracing_on");
 			(void)write_path(path, "0\n");
 		}
-		/* Every instance holds the same triggers; read instance 0 once. */
+		/* Every instance holds the same triggers; read instance 0 once
+		 * (one read serves every slot, not one read per slot). */
 		probe_inst_path(path, sizeof(path), root, 0, "trace");
-		for (idx = 0; idx < PROBE_SLOT_COUNT; idx++)
-			hit_probes[idx].count +=
-				count_trace_event_buf(path, hit_probes[idx].event,
-						      probe_trace_buf[0]);
+		(void)count_trace_path(path);
 		o_put(P "probe: trigger threads=");
 		o_dec(started + 1);
 		o_put("\n");
