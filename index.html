@@ -6,8 +6,8 @@
   <title>SUSFS Guard LKM · 项目文档</title>
   <meta name="description" content="SUSFS 可加载内核模块的项目文档，包括安装说明、Android GKI 兼容表和接口参考。">
   <meta name="author" content="inforcqb">
-  <meta name="theme-color" content="#f9f9f6">
-  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#10171c">
+  <meta name="color-scheme" content="dark">
   <link rel="canonical" href="https://inforcqb.github.io/susfs4ksu-for-lkm/">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.webmanifest">
@@ -74,17 +74,18 @@
   <main id="main" class="container">
     <section id="features" class="intro" aria-labelledby="hero-title">
       <div class="intro-copy">
-        <h1 id="hero-title">SUSFS <i>Guard LKM</i></h1>
+        <h1 id="hero-title">SUSFS <span>Guard LKM</span></h1>
         <p>这是 SUSFS 的可加载内核模块版本。模块以 <code>.ko</code> 文件发布，设备可以继续使用原厂 GKI 内核。</p>
         <div class="intro-links">
           <a class="button" href="https://github.com/inforcqb/susfs4ksu-for-lkm/releases/latest">下载最新版本</a>
           <a href="https://github.com/inforcqb/susfs4ksu-for-lkm/releases">版本记录</a>
         </div>
       </div>
+      <img class="chip-drawing" src="assets/module-drawing.svg" width="440" height="260" alt="">
       <aside class="specs" aria-labelledby="specs-title">
         <h2 id="specs-title">运行环境</h2>
         <dl>
-          <div><dt>系统</dt><dd>Android 12 及以上</dd></div>
+          <div><dt>系统</dt><dd>Android 12+</dd></div>
           <div><dt>架构</dt><dd>arm64-v8a</dd></div>
           <div><dt>内核</dt><dd>GKI 5.10–6.18</dd></div>
         </dl>
