@@ -1469,7 +1469,7 @@ struct probe_map_file {
 	u8 sha[32];
 };
 
-static bool str_eq(const char *a, const char *b)
+static int str_eq(const char *a, const char *b)
 {
 	u64 n = 0;
 
