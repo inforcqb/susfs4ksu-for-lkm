@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="260" viewBox="0 0 440 260" fill="none">
+  <defs>
+    <pattern id="grid" width="16" height="16" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r=".8" fill="#35424a"/>
+    </pattern>
+    <path id="board" d="M-88-96H76l20 20V84L84 96H-78l-18-18V-88Z"/>
+    <g id="traces" stroke-linejoin="round">
+      <path d="M-88-71h22l17 17h18m-57-8h19l16 16h19m-54-6h16l14 14h21M-85 62h31l22-22v-9m-53 40h35l26-26v-9M13 87V63l15-15h16m-22 39V67l12-12h20"/>
+      <circle cx="-29" cy="-54" r="2"/><circle cx="-32" cy="-46" r="2"/>
+      <circle cx="-34" cy="-38" r="2"/><circle cx="46" cy="48" r="2"/>
+      <circle cx="56" cy="55" r="2"/>
+    </g>
+    <g id="contacts" stroke="#e2a675" stroke-width="3">
+      <path d="M-39 46v12m8-12v12m8-12v12m8-12v12m8-12v12m8-12v12m8-12v12m8-12v12m8-12v12m8-12v12m8-12v12"/>
+    </g>
+    <g id="mount" stroke="#76959e" stroke-width="1.2">
+      <circle r="5"/><circle r="2"/>
+    </g>
+  </defs>
+
+  <rect x="7" y="7" width="426" height="246" fill="url(#grid)"/>
+  <path d="M7 25V7h18m390 0h18v18M7 235v18h18m390 0h18v-18" stroke="#52717c"/>
+
+  <!-- Board edge and copper routing, in the same projection as the package. -->
+  <g transform="matrix(1 .43 -1 .43 220 162)">
+    <use href="#board" transform="translate(6 6)" fill="#16232b" stroke="#66848a" stroke-width="1.4"/>
+    <use href="#board" fill="#1d3139" stroke="#88a9ae" stroke-width="1.5"/>
+    <g stroke="#50727c" stroke-width="1.4">
+      <use href="#traces"/><use href="#traces" transform="rotate(180)"/>
+    </g>
+    <path d="M-86 48h22l14-14h25m63 47V66l16-16h28" stroke="#e4a370" stroke-width="2"/>
+    <use href="#mount" x="-79" y="-80"/><use href="#mount" x="76" y="-73"/>
+    <use href="#mount" x="-77" y="74"/><use href="#mount" x="77" y="75"/>
+    <rect x="-53" y="-53" width="106" height="106" stroke="#70949b" stroke-dasharray="5 4"/>
+  </g>
+
+  <!-- Registration lines connect the separated layers in the drawing. -->
+  <path d="M118 95v65m102-25v72m102-112v65m-102-111v65" stroke="#7e9ba2" stroke-dasharray="3 5"/>
+  <g transform="matrix(1 .43 -1 .43 220 115)">
+    <rect x="-54" y="-54" width="108" height="108" transform="translate(5 5)" fill="#18282f" stroke="#77929a"/>
+    <rect x="-54" y="-54" width="108" height="108" fill="#2a3d46" stroke="#a2bbc0" stroke-width="1.5"/>
+    <use href="#contacts"/><use href="#contacts" transform="rotate(90)"/>
+    <use href="#contacts" transform="rotate(180)"/><use href="#contacts" transform="rotate(270)"/>
+  </g>
+
+  <!-- Stepped package lid repeats the square die in the site's chip mark. -->
+  <g transform="matrix(1 .43 -1 .43 220 77)">
+    <path d="M-49 49h98v-98l9 9v98h-98Z" fill="#23313a" stroke="#a4afb0"/>
+    <path d="M-49-49h87l11 11v87h-98Z" fill="#39464a" stroke="#f3bc8c" stroke-width="1.7"/>
+    <path d="M-41-41h74l9 9v73h-83Z" stroke="#6e7a7c"/>
+    <rect x="-19" y="-19" width="38" height="38" stroke="#f8ad72" stroke-width="2"/>
+    <rect x="-9" y="-9" width="18" height="18" fill="#ffae70"/>
+    <circle cx="-32" cy="-32" r="2.3" fill="#f8ad72"/>
+  </g>
+</svg>
