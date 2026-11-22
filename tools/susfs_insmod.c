@@ -2556,16 +2556,11 @@ void insmod_main(long argc, char **argv)
 }
 
 #if !defined(SUSFS_INSMOD_HOSTTEST)
-__asm__(
-".text\n"
-".global _start\n"
-".type _start,%function\n"
-"_start:\n"
-"	mov	x29, #0\n"
-"	ldr	x0, [sp]\n"
-"	add	x1, sp, #8\n"
-"	bl	insmod_main\n"
-"	mov	x8, #93\n"
-"	svc	#0\n"
-);
+/* Built with the NDK now, so the C runtime owns the entry point: keep the
+ * hand-written syscall helpers, but let bionic's crt call main(). */
+int main(int argc, char **argv)
+{
+	insmod_main((long)argc, argv);
+	return 0;
+}
 #endif
