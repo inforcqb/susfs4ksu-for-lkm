@@ -964,7 +964,7 @@ jobs:
         run: |
           set -e
           CC="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
-          "$CC" -O2 -g -static -mno-outline-atomics -o /tmp/susfs_insmod_ndk tools/susfs_insmod.c
+          "$CC" -O2 -g -mno-outline-atomics -o /tmp/susfs_insmod_ndk tools/susfs_insmod.c
           file /tmp/susfs_insmod_ndk
           ls -la /tmp/susfs_insmod_ndk
 
