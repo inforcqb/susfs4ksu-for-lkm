@@ -1995,6 +1995,8 @@ static void usage(void)
 	o_put(P "          cache for this kernel release is reused, -t forces a fresh probe\n");
 	o_put(P "       -t splits the probe triggers over threads (default 4, max 12; needs -p)\n");
 	o_put(P "       -P uses the given map file (format-checked, one shot, no cache write)\n");
+	o_put(P "       -pn [map-file] only makes a map: with a path it probes and writes it,\n");
+	o_put(P "          without one it re-seals the cached map (install-time, ZIP friendly)\n");
 	o_flush();
 	finish(2);
 }
@@ -2025,9 +2027,23 @@ void insmod_main(long argc, char **argv)
 	int do_probe = 0;
 	int probe_force = 0;
 	const char *map_path = 0;
+	const char *pn_path = 0;
+	int pn_fill_sha = 0;
 
 	/* ---- argv ---- */
 	u = 1;
+	/* -pn [file]: map only.  With a path it probes once and writes that map;
+	 * without one it re-seals the cached map (SHA-256) for the installer. */
+	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'p' &&
+	    argv[u][2] == 'n' && argv[u][3] == 0) {
+		u++;
+		if (u < (u64)argc && argv[u][0] != '-')
+			pn_path = argv[u++];
+		else
+			pn_fill_sha = 1;
+		if (pn_fill_sha && u < (u64)argc)
+			die("-pn without a path takes no further arguments", -22);
+	}
 	if (u < (u64)argc && argv[u][0] == '-' && argv[u][1] == 'p' && argv[u][2] == 0) {
 		u32 rounds;
 
@@ -2068,6 +2084,44 @@ void insmod_main(long argc, char **argv)
 		} else {
 			probe_threads = 4;
 		}
+	}
+	if (pn_path || pn_fill_sha) {
+		char kver[64];
+		u32 bits[SUSFS_HOOK_WORDS];
+
+		if (pn_fill_sha) {
+			/* Install-time pre-processing: re-hash the cached map. */
+			if (probe_map_load(PROBE_CACHE_PATH, bits, kver,
+					   sizeof(kver), 0)) {
+				o_put(P "-pn: no cached map to seal\n");
+				o_flush();
+				finish(1);
+			}
+			if (probe_map_store(PROBE_CACHE_PATH, bits, kver)) {
+				o_put(P "-pn: cannot write the cache\n");
+				o_flush();
+				finish(1);
+			}
+			o_put(P "-pn: sealed " PROBE_CACHE_PATH "\n");
+		} else {
+			if (probe_hits()) {
+				o_put(P "-pn: probe failed\n");
+				o_flush();
+				finish(1);
+			}
+			if (probe_kver(kver, sizeof(kver)))
+				kver[0] = 0;
+			if (probe_map_store(pn_path, probe_bits, kver)) {
+				o_put(P "-pn: cannot write the map file\n");
+				o_flush();
+				finish(1);
+			}
+			o_put(P "-pn: wrote ");
+			o_put(pn_path);
+			o_put("\n");
+		}
+		o_flush();
+		finish(0);
 	}
 	if (u >= (u64)argc)
 		usage();
