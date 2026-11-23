@@ -19,16 +19,27 @@ set_description() {
 
 exec >"$MODDIR/load.log" 2>&1
 echo "susfs_guard_lkm loader: $(date)"
+BOOT_ID=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+REL=$(cat /proc/sys/kernel/osrelease 2>/dev/null) || REL=""
+[ -n "$REL" ] || REL="unknown"
 # This module's own directory appears only after a successful load of our .ko, so
 # it distinguishes "our earlier/early load" from a built-in susfs.  Do not stack.
 if [ -d /sys/module/susfs_guard_lkm ]; then
-  echo "susfs_guard_lkm is already loaded; nothing to do."
-  set_description "already loaded | kernel $(cat /proc/sys/kernel/osrelease 2>/dev/null)"
+  if [ -f "$MODDIR/early_state" ] &&
+     [ "$(head -n1 "$MODDIR/early_state" 2>/dev/null)" = "$BOOT_ID" ]; then
+    EKMI=$(sed -n '2s/ .*//p' "$MODDIR/early_state" 2>/dev/null)
+    EREL=$(sed -n '2s/^[^ ]* //p' "$MODDIR/early_state" 2>/dev/null)
+    echo "susfs_guard_lkm was loaded early this boot; nothing to do."
+    set_description "✅ early loaded (${EKMI:-$KMI}) | kernel ${EREL:-$REL}"
+  else
+    echo "susfs_guard_lkm is already loaded; nothing to do."
+    set_description "✅ loaded | kernel $REL"
+  fi
   exit 0
 fi
 if [ -e /proc/susfs_path ]; then
   echo "susfs already present from another source; nothing to do."
-  set_description "already present (built-in) | kernel $(cat /proc/sys/kernel/osrelease 2>/dev/null)"
+  set_description "✅ present (built-in) | kernel $REL"
   exit 0
 fi
 REL=$(cat /proc/sys/kernel/osrelease 2>/dev/null) || REL=""
@@ -149,6 +160,14 @@ dmesg_stop
 rm -f "$TIMEOUT_DMESG_LOG"
 if [ "$rc" = 0 ]; then
   echo "loaded ($MODE)."
+  if [ "$SUSFS_LOAD_MODE" = early ]; then
+    # Record that this boot's load came from the early dispatcher, so the later
+    # post-fs-data pass can report "✅ early loaded" instead of "already loaded".
+    {
+      cat /proc/sys/kernel/random/boot_id 2>/dev/null
+      echo "$KMI $REL"
+    } > "$MODDIR/early_state" 2>/dev/null
+  fi
   if [ "$MODE" = custom ]; then
     set_description "✅ custom load ($KMI) | kernel $REL"
   elif [ "$MODE" = ksud ]; then

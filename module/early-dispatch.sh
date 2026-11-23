@@ -11,4 +11,4 @@ MODDIR=$INSTALLED
 [ -d "$MODDIR" ] || exit 0
 [ ! -f "$MODDIR/disable" ] && [ ! -f "$MODDIR/remove" ] || exit 0
 [ -f "$MODDIR/early_load" ] || exit 0
-exec /system/bin/sh "$MODDIR/load.sh"
+SUSFS_LOAD_MODE=early exec /system/bin/sh "$MODDIR/load.sh"
