@@ -35,3 +35,13 @@ ui_print "- KMI is selected by the boot loader, not by this installer"
 ui_print "- Loader only; no rules are applied"
 ui_print "- Reboot to load; will not stack on an already-present susfs"
 ui_print "- Optional early loading: create $INSTALLED/early_load, then reboot."
+# Pre-compute the probe map while the manager has a live tracefs: every later
+# `-p` load then reuses /data/adb/susfs_probe_map instead of probing again.
+# Failure is not fatal - the first `-p` load probes and caches it itself.
+if [ -x "$MODPATH/bin/susfs_insmod" ]; then
+  if "$MODPATH/bin/susfs_insmod" -P >/dev/null 2>&1; then
+    ui_print "- probe map pre-computed ($(uname -r 2>/dev/null))"
+  else
+    ui_print "- probe map not pre-computed; the first load will do it"
+  fi
+fi

@@ -114,8 +114,9 @@ dmesg_start() {
 }
 if [ -n "$TIMEOUT_BIN" ]; then
   dmesg_start
-  # -p: run the pre-load hit probe and patch the module's hook map from its result before
-  # loading (probe failure falls back to the default map and the load continues).
+  # -p: patch the module's hook map before loading.  The installer pre-computes
+  # /data/adb/susfs_probe_map with -P, so this reuses it; when the map is missing,
+  # stale or for another kernel release it probes once and caches the result.
   "$TIMEOUT_BIN" "$LOAD_TIMEOUT" "$MODDIR/bin/susfs_insmod" -p "$KO" expose_proc=1
   rc=$?
 else
