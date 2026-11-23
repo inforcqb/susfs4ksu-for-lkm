@@ -19,11 +19,16 @@ set_description() {
 
 exec >"$MODDIR/load.log" 2>&1
 echo "susfs_guard_lkm loader: $(date)"
-# The /proc control nodes exist only while sus_path's LSM layer is installed, so
-# their presence means susfs is already up (built-in or an earlier load). Do not stack.
-if [ -e /proc/susfs_path ] || [ -d /sys/module/susfs_guard_lkm ]; then
-  echo "susfs already present; nothing to do."
-  set_description "already present (built-in or loaded earlier)"
+# This module's own directory appears only after a successful load of our .ko, so
+# it distinguishes "our earlier/early load" from a built-in susfs.  Do not stack.
+if [ -d /sys/module/susfs_guard_lkm ]; then
+  echo "susfs_guard_lkm is already loaded; nothing to do."
+  set_description "already loaded | kernel $(cat /proc/sys/kernel/osrelease 2>/dev/null)"
+  exit 0
+fi
+if [ -e /proc/susfs_path ]; then
+  echo "susfs already present from another source; nothing to do."
+  set_description "already present (built-in) | kernel $(cat /proc/sys/kernel/osrelease 2>/dev/null)"
   exit 0
 fi
 REL=$(cat /proc/sys/kernel/osrelease 2>/dev/null) || REL=""
