@@ -63,7 +63,6 @@ static void susfs_show_enabled_features(void __user **arg)
 	if (!info) {
 		/* Answering nothing would leave the caller unable to tell "no memory" from
 		 * "the kernel said nothing": report it in the ABI's err field. */
-		susfs_enabled_features_nomem.err = -ENOMEM;
 		if (copy_to_user((void __user *)*arg, &susfs_enabled_features_nomem,
 				 sizeof(susfs_enabled_features_nomem)))
 			pr_warn("susfs show_enabled_features copy_to_user failed\n");

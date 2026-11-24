@@ -3,6 +3,7 @@
  * susfs_supercall_data.c - supercall registry and state (D layer)
  */
 
+#include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/bitmap.h>
 
@@ -32,11 +33,11 @@ const unsigned int susfs_feature_table_count = ARRAY_SIZE(susfs_feature_table);
 
 static DECLARE_BITMAP(susfs_armed_features, SUSFS_FEAT_COUNT);
 
-/* The -ENOMEM answer for CMD_SUSFS_SHOW_ENABLED_FEATURES is the whole ABI struct (8192-byte
- * string + err), copied in one piece.  As a local it broke the 6.1/6.6 builds: "stack frame
- * size (8320) exceeds limit (2048) in 'susfs_tw_func' [-Wframe-larger-than]", an error
- * there.  As a static it is harmless - BSS-zeroed, err = -ENOMEM, same for every caller. */
-struct st_susfs_enabled_features susfs_enabled_features_nomem;
+/* Keep the full ABI reply off the kernel stack. Concurrent allocation
+ * failures can copy the same immutable reply without touching shared state. */
+const struct st_susfs_enabled_features susfs_enabled_features_nomem = {
+	.err = -ENOMEM,
+};
 
 susfs_syscall_fn_t susfs_reboot_orig;
 bool susfs_sc_fp_armed;		/* sys_call_table path armed */
