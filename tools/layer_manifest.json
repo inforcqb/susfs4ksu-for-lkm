@@ -902,6 +902,11 @@
       "layer": "D",
       "phase": 18,
       "budget": 0
+    },
+    "kernel/susfs_query_abi.h": {
+      "layer": "D",
+      "phase": 18,
+      "budget": 0
     }
   },
   "header_contract": {
@@ -965,7 +970,8 @@
       "sus_mount_identity_logic.h",
       "sus_mount_identity_view.h",
       "sus_mount_identity_data.h",
-      "sus_mount_identity_values.h"
+      "sus_mount_identity_values.h",
+      "susfs_query_abi.h"
     ]
   }
 }

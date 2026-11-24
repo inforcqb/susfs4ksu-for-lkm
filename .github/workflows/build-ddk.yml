@@ -740,6 +740,8 @@ jobs:
       - name: Build userspace supercall client
         run: |
           set -e
+          clang -std=c11 -Wall -Wextra -Werror tools/susfs_sc_query_test.c -o /tmp/query-test
+          /tmp/query-test
           clang --target=aarch64-linux-gnu -O2 -nostdlib -static-pie \
                 -fno-stack-protector -fno-builtin -fuse-ld=lld -Wl,-e,_start \
                 -o /tmp/susfs_sc tools/susfs_sc.c

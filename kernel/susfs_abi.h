@@ -9,6 +9,7 @@
 #ifndef __SUSFS_ABI_H
 #define __SUSFS_ABI_H
 
+#include "susfs_query_abi.h"
 #include <linux/types.h>
 #include <linux/utsname.h>	/* __NEW_UTS_LEN (struct st_susfs_uname) */
 
@@ -33,9 +34,6 @@
 #define CMD_SUSFS_ENABLE_LOG                    0x555a0
 #define CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG     0x555b0
 #define CMD_SUSFS_ADD_OPEN_REDIRECT             0x555c0
-#define CMD_SUSFS_SHOW_VERSION                  0x555e1
-#define CMD_SUSFS_SHOW_ENABLED_FEATURES         0x555e2
-#define CMD_SUSFS_SHOW_VARIANT                  0x555e3
 #define CMD_SUSFS_SHOW_SUS_SU_WORKING_MODE      0x555e4 /* deprecated */
 #define CMD_SUSFS_IS_SUS_SU_READY               0x555f0 /* deprecated */
 #define CMD_SUSFS_SUS_SU                        0x60000 /* deprecated */
@@ -55,9 +53,6 @@
 
 #define SUSFS_MAX_LEN_PATHNAME                  256
 #define SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE   8192
-#define SUSFS_ENABLED_FEATURES_SIZE             8192
-#define SUSFS_MAX_VERSION_BUFSIZE               16
-#define SUSFS_MAX_VARIANT_BUFSIZE               16
 
 #define SUSFS_VERSION_STR "v2.3.0"
 #define SUSFS_VARIANT_STR "GKI-LKM"
@@ -157,21 +152,6 @@ struct st_susfs_open_redirect {
 
 struct st_susfs_spoof_cmdline_or_bootconfig {
 	char fake_cmdline_or_bootconfig[SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE];
-	int err;
-};
-
-struct st_susfs_version {
-	char susfs_version[SUSFS_MAX_VERSION_BUFSIZE];
-	int err;
-};
-
-struct st_susfs_variant {
-	char susfs_variant[SUSFS_MAX_VARIANT_BUFSIZE];
-	int err;
-};
-
-struct st_susfs_enabled_features {
-	char enabled_features[SUSFS_ENABLED_FEATURES_SIZE];
 	int err;
 };
 

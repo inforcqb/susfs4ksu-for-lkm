@@ -34,6 +34,8 @@
  * otherwise, 2 for a usage error.
  */
 
+#include "../kernel/susfs_query_abi.h"
+
 typedef unsigned long u64;
 typedef long s64;
 
@@ -47,7 +49,7 @@ typedef long s64;
 /* Large enough for the biggest payload struct in the ABI
  * (st_susfs_spoof_cmdline_or_bootconfig and st_susfs_enabled_features are 8196:
  * a 4096-byte buffer here made the kernel copy 4 KB past its end). */
-#define PAYLOAD_MAX 8196
+#define PAYLOAD_MAX ((long)sizeof(struct st_susfs_enabled_features))
 
 /* Every reply struct in kernel/susfs_abi.h ends with its `int err` as the LAST
  * field, and all twelve have sizeof - offsetof(err) == 4 (260/256, 376/372,
@@ -61,6 +63,9 @@ typedef long s64;
 static char payload[PAYLOAD_MAX] __attribute__((aligned(16)));
 static char out[256];
 
+#ifdef SUSFS_SC_HOST_TEST
+static long sys4(long n, long a, long b, long c, long d);
+#else
 static long sys4(long n, long a, long b, long c, long d)
 {
 	register long x8 __asm__("x8") = n;
@@ -75,6 +80,8 @@ static long sys4(long n, long a, long b, long c, long d)
 			 : "memory", "cc");
 	return x0;
 }
+
+#endif
 
 static unsigned long slen(const char *s)
 {
@@ -188,7 +195,7 @@ static long parse_cmd(const char *s)
 
 int sc_main(long argc, char **argv)
 {
-	long cmd, len;
+	long cmd, len, query_size = 0;
 	long rc;
 	int err;
 
@@ -215,6 +222,26 @@ int sc_main(long argc, char **argv)
 		}
 	}
 
+	/* Output queries have a known reply layout even with no hex argument. */
+	switch (cmd) {
+	case CMD_SUSFS_SHOW_VERSION:
+		query_size = sizeof(struct st_susfs_version);
+		break;
+	case CMD_SUSFS_SHOW_VARIANT:
+		query_size = sizeof(struct st_susfs_variant);
+		break;
+	case CMD_SUSFS_SHOW_ENABLED_FEATURES:
+		query_size = sizeof(struct st_susfs_enabled_features);
+		break;
+	}
+	if (query_size) {
+		if (argc > 2 && len != query_size) {
+			say("susfs_sc: wrong query payload size\n");
+			return 2;
+		}
+		len = query_size;
+	}
+
 	/* Seed 126 like the stock C tool does: if the kernel does not recognise the
 	 * command it leaves the buffer untouched, and "still 126" is how userspace
 	 * detects "not supported".  Without the seed this client could never show
@@ -236,11 +263,21 @@ int sc_main(long argc, char **argv)
 	say(")\n");
 	if (len >= 4 && err == ERR_SEED)
 		say("susfs_sc: err is still the 126 sentinel: this kernel did not answer that command\n");
+	if (query_size && !rc && !err) {
+		long n = 0;
+
+		while (n < query_size - (long)sizeof(err) && payload[n])
+			n++;
+		puts_len(payload, n);
+		if (!n || payload[n - 1] != '\n')
+			say("\n");
+	}
 	/* Non-zero when either half of the contract failed: the syscall result or
 	 * the err the kernel wrote back. */
 	return (rc == 0 && err == 0) ? 0 : 1;
 }
 
+#ifndef SUSFS_SC_HOST_TEST
 __asm__(
 ".text\n"
 ".global _start\n"
@@ -253,3 +290,4 @@ __asm__(
 "	mov	x8, #93\n"
 "	svc	#0\n"
 );
+#endif
