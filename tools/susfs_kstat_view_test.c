@@ -12,7 +12,7 @@ static struct susfs_kstat_view base(void)
 
 	memset(&v, 0, sizeof(v));
 	v.table_empty = false;
-	v.caller_is_umounted_app = true;
+	v.caller_is_app = true;
 	return v;
 }
 
@@ -44,7 +44,7 @@ int main(void)
 	assert(susfs_kstat_decide_core(&v) == SUSFS_KSTAT_SKIP);
 
 	v = base();
-	v.caller_is_umounted_app = false;
+	v.caller_is_app = false;
 	v.rule_matched = true;
 	v.spoof_flags = 1;
 	assert(susfs_kstat_decide_core(&v) == SUSFS_KSTAT_SKIP);
