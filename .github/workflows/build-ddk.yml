@@ -1054,9 +1054,36 @@ jobs:
             --out "dist/susfs_guard_lkm-module-$tag-arm64.zip"
           ls -l dist
 
+      # A workflow artifact is always re-zipped when it is downloaded, so uploading the packed ZIP
+      # hands people a ZIP inside a ZIP: the outer susfs_guard_lkm-module-arm64.zip is the wrapper
+      # GitHub puts around every artifact, and the module is the inner file.  Unpack the ZIP and
+      # upload its contents, so the downloaded susfs_guard_lkm-module-arm64.zip IS the flashable
+      # module, with module.prop at the root.  Provenance still travels inside it, in module.prop
+      # and provenance.json.  upload-artifact normalises file modes (directories 0755, files 0644);
+      # customize.sh re-applies the loader's and the scripts' 0755 on install, so the unpacked
+      # layout flashes exactly like the ZIP did.
+      - name: Unpack the module for a directly flashable artifact
+        run: |
+          set -euo pipefail
+          python - <<'EOF'
+          import glob, pathlib, shutil, zipfile
+          packed = glob.glob("dist/susfs_guard_lkm-module-*-arm64.zip")
+          if len(packed) != 1:
+              raise SystemExit(f"expected exactly one packed module, found {packed}")
+          out = pathlib.Path("dist/module")
+          if out.exists():
+              shutil.rmtree(out)
+          out.mkdir(parents=True)
+          with zipfile.ZipFile(packed[0]) as z:
+              z.extractall(out)
+          if not (out / "module.prop").is_file():
+              raise SystemExit("module.prop is not at the ZIP root - refusing a non-flashable layout")
+          EOF
+          ls -lR dist/module
+
       - name: Upload the flashable module
         uses: actions/upload-artifact@v6
         with:
           name: susfs_guard_lkm-module-arm64
-          path: dist/*.zip
+          path: dist/module
           if-no-files-found: error
