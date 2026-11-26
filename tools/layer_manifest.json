@@ -902,6 +902,16 @@
       "layer": "D",
       "phase": 18,
       "budget": 0
+    },
+    "kernel/susfs_selinux_hide.c": {
+      "layer": "F",
+      "phase": 14,
+      "budget": 0
+    },
+    "kernel/susfs_selinux_hide.h": {
+      "layer": "F",
+      "phase": 14,
+      "budget": 0
     }
   },
   "header_contract": {
