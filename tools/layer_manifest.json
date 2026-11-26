@@ -912,6 +912,16 @@
       "layer": "F",
       "phase": 14,
       "budget": 0
+    },
+    "kernel/susfs_selinux_ctx.c": {
+      "layer": "P",
+      "phase": 14,
+      "budget": 0
+    },
+    "kernel/susfs_selinux_ctx.h": {
+      "layer": "F",
+      "phase": 14,
+      "budget": 0
     }
   },
   "header_contract": {
