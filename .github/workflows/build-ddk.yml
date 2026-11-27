@@ -892,6 +892,21 @@ jobs:
           path: /tmp/susfs_mntid
           if-no-files-found: error
 
+      # priority_uid_filter: call getpriority/setpriority/ioprio_* with PRIO_USER /
+      # IOPRIO_WHO_USER from an app uid and print the raw return (-22 = -EINVAL).
+      - name: Build priority-syscall probe
+        run: |
+          clang --target=aarch64-linux-gnu -O2 -nostdlib -static-pie                 -fno-stack-protector -fno-builtin -fuse-ld=lld -Wl,-e,_start                 -o /tmp/susfs_prio tools/susfs_prio.c
+          file /tmp/susfs_prio
+          ls -la /tmp/susfs_prio
+
+      - name: Upload priority-syscall probe
+        uses: actions/upload-artifact@v6
+        with:
+          name: susfs_prio
+          path: /tmp/susfs_prio
+          if-no-files-found: error
+
       # A 32-bit client.  Only a real AArch32 caller can exercise the compat stat path, and the audit showed the module
       # had the compat structure wrong - no 64-bit test could have seen that.
       - name: Build 32-bit compat stat client
