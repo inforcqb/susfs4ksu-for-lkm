@@ -30,6 +30,6 @@ void susfs_wait_for_readers(void);
 
 /* The build's version string.  It lives here rather than in susfs_main.c because imports_guard.c
  * reports it when it refuses a load - and that happens before susfs_main.c prints its banner. */
-#define SUSFS_LKM_VERSION "2.3.0-gki"
+#define SUSFS_LKM_VERSION "2.4.0-gki"
 
 #endif /* __SUSFS_CORE_H */
