@@ -5,14 +5,14 @@
  * without a libc or a full app.
  *
  * Usage:
- *   susfs_prio getpriority <which> <who>
- *   susfs_prio setpriority <which> <who> <nice>
- *   susfs_prio ioprio_get  <which> <who>
- *   susfs_prio ioprio_set  <which> <who> <ioprio>
+ *   susfs_prio <syscall> <which> <who> [value]       one call, prints rc=N
+ *   susfs_prio bench <syscall> <which> <who> <iters>  loop, prints total/avg ns
  *
- * which: 0 = PROCESS, 1 = PGRP, 2 = USER (getpriority/setpriority);
- *        1 = PROCESS, 2 = PGRP, 3 = USER (ioprio_get/set).
- * Prints "rc=N" (the raw syscall return; -22 is -EINVAL from the filter).
+ * syscall: getpriority / setpriority / ioprio_get / ioprio_set
+ * which:   0 = PROCESS, 1 = PGRP, 2 = USER (getpriority/setpriority);
+ *          1 = PROCESS, 2 = PGRP, 3 = USER (ioprio_get/set)
+ * Bench measures wall time of <iters> calls in this process (CLOCK_MONOTONIC),
+ * so run it under `su <app uid> -c` for the app fast path.
  *
  * Build: same freestanding flags as susfs_sc.
  */
@@ -26,6 +26,23 @@ typedef long s64;
 #define SYS_setpriority 140
 #define SYS_ioprio_get  31
 #define SYS_ioprio_set  30
+#define SYS_clock_gettime 113
+
+#define CLOCK_MONOTONIC 1
+
+struct ts {
+	long sec;
+	long nsec;
+};
+
+static long sys0(long n)
+{
+	register long x0 asm("x0") = 0;
+	register long x8 asm("x8") = n;
+
+	asm volatile("svc #0" : "+r"(x0) : "r"(x8) : "memory");
+	return x0;
+}
 
 static long sys2(long n, long a, long b)
 {
@@ -34,15 +51,6 @@ static long sys2(long n, long a, long b)
 	register long x8 asm("x8") = n;
 
 	asm volatile("svc #0" : "+r"(x0) : "r"(x1), "r"(x8) : "memory");
-	return x0;
-}
-
-static long sys0(long n)
-{
-	register long x0 asm("x0") = 0;
-	register long x8 asm("x8") = n;
-
-	asm volatile("svc #0" : "+r"(x0) : "r"(x8) : "memory");
 	return x0;
 }
 
@@ -57,17 +65,13 @@ static long sys3(long n, long a, long b, long c)
 	return x0;
 }
 
-static void out(const char *s)
+static void outs(const char *s)
 {
-	while (*s) {
-		register long x0 asm("x0") = 1;
-		register long x1 asm("x1") = (long)s;
-		register long x2 asm("x2") = 1;
-		register long x8 asm("x8") = SYS_write;
+	long n = 0;
 
-		asm volatile("svc #0" : "+r"(x0) : "r"(x1), "r"(x2), "r"(x8) : "memory");
-		s++;
-	}
+	while (s[n])
+		n++;
+	(void)sys3(SYS_write, 1, (long)s, n);
 }
 
 static void out_num(long v)
@@ -75,9 +79,10 @@ static void out_num(long v)
 	char b[24];
 	int i = 0;
 	unsigned long u;
+	char neg = 0;
 
 	if (v < 0) {
-		out("-");
+		neg = 1;
 		u = (unsigned long)(-v);
 	} else {
 		u = (unsigned long)v;
@@ -86,8 +91,13 @@ static void out_num(long v)
 		b[i++] = '0' + (u % 10);
 		u /= 10;
 	} while (u);
-	while (i)
-		out((char[]){b[--i], 0});
+	if (neg)
+		(void)sys3(SYS_write, 1, (long)"-", 1);
+	while (i) {
+		char c = b[--i];
+
+		(void)sys3(SYS_write, 1, (long)&c, 1);
+	}
 }
 
 static int streq(const char *a, const char *b)
@@ -113,33 +123,72 @@ static long parse(const char *s)
 	return neg ? -v : v;
 }
 
+static long do_call(const char *name, long which, long who, long val)
+{
+	if (streq(name, "getpriority"))
+		return sys2(SYS_getpriority, which, who);
+	if (streq(name, "setpriority"))
+		return sys3(SYS_setpriority, which, who, val);
+	if (streq(name, "ioprio_get"))
+		return sys2(SYS_ioprio_get, which, who);
+	if (streq(name, "ioprio_set"))
+		return sys3(SYS_ioprio_set, which, who, val);
+	return -1;
+}
+
+static void bench(const char *name, long which, long who, long iters)
+{
+	struct ts t0, t1;
+	volatile long sum = 0;
+	long i;
+
+	(void)sys2(SYS_clock_gettime, CLOCK_MONOTONIC, (long)&t0);
+	for (i = 0; i < iters; i++)
+		sum += do_call(name, which, who, 0);
+	(void)sys2(SYS_clock_gettime, CLOCK_MONOTONIC, (long)&t1);
+	{
+		unsigned long ns = (unsigned long)((t1.sec - t0.sec) * 1000000000L +
+						   (t1.nsec - t0.nsec));
+
+		outs("iters=");
+		out_num(iters);
+		outs(" total_ns=");
+		out_num((long)ns);
+		outs(" avg_ns=");
+		if (iters)
+			out_num((long)(ns / (unsigned long)iters));
+		else
+			out_num(0);
+		outs(" sum=");
+		out_num(sum);
+		outs("\n");
+	}
+}
+
 void _start_c(long *sp)
 {
 	int argc = (int)sp[0];
 	char **argv = (char **)&sp[1];
-	long rc;
 
-	if (argc < 3) {
-		out("usage: susfs_prio <syscall> <which> <who> [value]\n");
+	if (argc < 5) {
+		outs("usage: susfs_prio <syscall> <which> <who> [value]\n");
+		outs("       susfs_prio bench <syscall> <which> <who> <iters>\n");
 		sys0(SYS_exit);
 	}
-	if (streq(argv[1], "getpriority"))
-		rc = sys2(SYS_getpriority, parse(argv[2]), parse(argv[3]));
-	else if (streq(argv[1], "setpriority"))
-		rc = sys3(SYS_setpriority, parse(argv[2]), parse(argv[3]),
-			  argc > 4 ? parse(argv[4]) : 0);
-	else if (streq(argv[1], "ioprio_get"))
-		rc = sys2(SYS_ioprio_get, parse(argv[2]), parse(argv[3]));
-	else if (streq(argv[1], "ioprio_set"))
-		rc = sys3(SYS_ioprio_set, parse(argv[2]), parse(argv[3]),
-			  argc > 4 ? parse(argv[4]) : 0);
-	else {
-		out("unknown syscall\n");
-		sys0(SYS_exit);
+	if (streq(argv[1], "bench")) {
+		if (argc < 6) {
+			outs("bench needs <iters>\n");
+			sys0(SYS_exit);
+		}
+		bench(argv[2], parse(argv[3]), parse(argv[4]), parse(argv[5]));
+	} else {
+		long rc = do_call(argv[1], parse(argv[2]), parse(argv[3]),
+				  argc > 4 ? parse(argv[4]) : 0);
+
+		outs("rc=");
+		out_num(rc);
+		outs("\n");
 	}
-	out("rc=");
-	out_num(rc);
-	out("\n");
 	sys0(SYS_exit);
 }
 
