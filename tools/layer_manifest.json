@@ -937,6 +937,11 @@
       "layer": "F",
       "phase": 14,
       "budget": 0
+    },
+    "kernel/susfs_ksu_stub.S": {
+      "layer": "P",
+      "phase": 14,
+      "budget": 0
     }
   },
   "header_contract": {
