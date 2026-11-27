@@ -922,6 +922,21 @@
       "layer": "F",
       "phase": 14,
       "budget": 0
+    },
+    "kernel/susfs_priority_uid.c": {
+      "layer": "L",
+      "phase": 14,
+      "budget": 0
+    },
+    "kernel/susfs_priority_hooks.c": {
+      "layer": "P",
+      "phase": 14,
+      "budget": 0
+    },
+    "kernel/susfs_priority_uid.h": {
+      "layer": "F",
+      "phase": 14,
+      "budget": 0
     }
   },
   "header_contract": {
